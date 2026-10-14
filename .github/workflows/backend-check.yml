@@ -1,0 +1,25 @@
+name: Backend check
+
+# Compiles the server exactly like the Docker build does, so a type error is
+# caught here instead of when START-SERVER runs on the PC.
+
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', '.github/workflows/backend-check.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --no-audit --no-fund
+      - run: npm run build

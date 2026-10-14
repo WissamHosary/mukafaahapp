@@ -41,5 +41,14 @@ export class AdminWebController {
   }
 }
 
-@Module({ controllers: [AdminWebController] })
+/** Opening the server address on its own (http://localhost:3000) goes to the Manager. */
+@Controller()
+export class RootRedirectController {
+  @Get()
+  root(@Res() reply: any) {
+    reply.redirect('/admin', 302);
+  }
+}
+
+@Module({ controllers: [AdminWebController, RootRedirectController] })
 export class AdminWebModule {}
