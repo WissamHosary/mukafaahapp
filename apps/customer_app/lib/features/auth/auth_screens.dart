@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -92,78 +94,76 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   Widget build(BuildContext context) {
     final s = ref.watch(stringsProvider);
     final t = Theme.of(context).textTheme;
+    // Fixed to the screen on every phone: the animation takes whatever height
+    // is left, so nothing ever needs scrolling.
+    final short = MediaQuery.sizeOf(context).height < 700;
     return Scaffold(
       backgroundColor: MkColors.canvas,
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, box) => SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(MkSpace.xl, MkSpace.sm, MkSpace.xl, MkSpace.lg),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: box.maxHeight - MkSpace.sm - MkSpace.lg),
-              child: IntrinsicHeight(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Align(alignment: AlignmentDirectional.centerEnd, child: _LangToggle()),
-                    const MkEntrance(child: Center(child: MkLogo(height: 104))),
-                    const SizedBox(height: MkSpace.md),
-                    const MkEntrance(index: 1, child: _WalletHero()),
-                    const SizedBox(height: MkSpace.lg),
-                    MkEntrance(
-                      index: 2,
-                      child: Text(
-                        s.tr('مكافآت من كل محل بتحبّه', 'Rewards from every shop you love'),
-                        textAlign: TextAlign.center,
-                        style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800, color: MkColors.ink),
-                      ),
-                    ),
-                    const SizedBox(height: MkSpace.xs),
-                    MkEntrance(
-                      index: 3,
-                      child: Text(
-                        s.tr('اجمع نقاط، افتح عروض وادفع أقل، كلّه بمحفظة وحدة.', 'Earn points, unlock offers and pay less, all in one wallet.'),
-                        textAlign: TextAlign.center,
-                        style: t.bodyLarge?.copyWith(color: MkColors.ink2),
-                      ),
-                    ),
-                    const Spacer(),
-                    const SizedBox(height: MkSpace.lg),
-                    MkEntrance(
-                      index: 4,
-                      child: MkButton(
-                        label: s.tr('كمّل بحساب Google', 'Continue with Google'),
-                        kind: MkButtonKind.secondary,
-                        icon: Icons.mail_outline_rounded,
-                        loading: _google,
-                        onPressed: _withGoogle,
-                      ),
-                    ),
-                    const SizedBox(height: MkSpace.sm),
-                    MkEntrance(
-                      index: 5,
-                      child: MkButton(
-                        label: s.tr('كمّل برقم التلفون', 'Continue with phone number'),
-                        icon: Icons.smartphone_rounded,
-                        onPressed: () => context.push('/phone'),
-                      ),
-                    ),
-                    const SizedBox(height: MkSpace.sm),
-                    Text(
-                      s.tr('بالمتابعة بتوافق على الشروط وسياسة الخصوصية.', 'By continuing you agree to the Terms and Privacy Policy.'),
-                      textAlign: TextAlign.center,
-                      style: t.labelSmall?.copyWith(color: MkColors.ink3),
-                    ),
-                    if (AppConfig.isDev) ...[
-                      const SizedBox(height: MkSpace.xs),
-                      MkDevServerButton(
-                        load: () => ref.read(apiClientProvider).currentServer(),
-                        save: (a) => ref.read(apiClientProvider).setDevServer(a),
-                      ),
-                    ],
-                  ],
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(MkSpace.xl, MkSpace.xs, MkSpace.xl, short ? MkSpace.sm : MkSpace.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  MkEntrance(child: MkLogo(height: short ? 54 : 72)),
+                  const Spacer(),
+                  const _LangToggle(),
+                ],
+              ),
+              const Expanded(child: MkEntrance(index: 1, child: _OrbitHero())),
+              MkEntrance(
+                index: 2,
+                child: Text(
+                  s.tr('مكافآت من كل محل بتحبّه', 'Rewards from every shop you love'),
+                  textAlign: TextAlign.center,
+                  style: (short ? t.titleLarge : t.headlineSmall)?.copyWith(fontWeight: FontWeight.w800, color: MkColors.ink),
                 ),
               ),
-            ),
+              const SizedBox(height: 4),
+              MkEntrance(
+                index: 3,
+                child: Text(
+                  s.tr('اجمع نقاط، افتح عروض وادفع أقل، كلّه بمحفظة وحدة.', 'Earn points, unlock offers and pay less, all in one wallet.'),
+                  textAlign: TextAlign.center,
+                  style: t.bodyMedium?.copyWith(color: MkColors.ink2),
+                ),
+              ),
+              SizedBox(height: short ? MkSpace.sm : MkSpace.lg),
+              MkEntrance(
+                index: 4,
+                child: MkButton(
+                  label: s.tr('كمّل بحساب Google', 'Continue with Google'),
+                  kind: MkButtonKind.secondary,
+                  icon: Icons.mail_outline_rounded,
+                  loading: _google,
+                  onPressed: _withGoogle,
+                ),
+              ),
+              const SizedBox(height: MkSpace.sm),
+              MkEntrance(
+                index: 5,
+                child: MkButton(
+                  label: s.tr('كمّل برقم التلفون', 'Continue with phone number'),
+                  icon: Icons.smartphone_rounded,
+                  onPressed: () => context.push('/phone'),
+                ),
+              ),
+              const SizedBox(height: MkSpace.xs),
+              Text(
+                s.tr('بالمتابعة بتوافق على الشروط وسياسة الخصوصية.', 'By continuing you agree to the Terms and Privacy Policy.'),
+                textAlign: TextAlign.center,
+                style: t.labelSmall?.copyWith(color: MkColors.ink3),
+              ),
+              if (AppConfig.isDev)
+                Center(
+                  child: MkDevServerButton(
+                    load: () => ref.read(apiClientProvider).currentServer(),
+                    save: (a) => ref.read(apiClientProvider).setDevServer(a),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -171,63 +171,244 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   }
 }
 
-/// Two tilted wallet cards and floating coins.
-class _WalletHero extends StatelessWidget {
-  const _WalletHero();
+/// The welcome animation: category bubbles orbit a 3D Mukafaah wallet card
+/// (passing behind and in front of it) and keep sending points into it.
+class _OrbitHero extends StatefulWidget {
+  const _OrbitHero();
+
+  @override
+  State<_OrbitHero> createState() => _OrbitHeroState();
+}
+
+class _Fly {
+  _Fly(this.from, this.amount, this.start);
+  final Offset from;
+  final int amount;
+  final double start;
+}
+
+class _OrbitHeroState extends State<_OrbitHero> with SingleTickerProviderStateMixin {
+  static const _bubbles = [
+    (Color(0xFFB05A1E), Icons.local_cafe_rounded),
+    (Color(0xFFC8463F), Icons.restaurant_rounded),
+    (Color(0xFF7446A8), Icons.checkroom_rounded),
+    (Color(0xFF2554C7), Icons.devices_rounded),
+    (Color(0xFF23307A), Icons.fitness_center_rounded),
+    (Color(0xFFC2477A), Icons.spa_rounded),
+  ];
+  static const _flyTime = 0.9;
+  static const _amounts = [40, 60, 85, 120, 150];
+
+  late final Ticker _ticker;
+  final _rnd = math.Random();
+  final List<_Fly> _flies = [];
+  double _t = 0;
+  double _lastFly = 0;
+  double _bumpAt = -10;
+  int _points = 2450;
+  Size _size = Size.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker((d) => setState(() => _t = d.inMicroseconds / 1e6))..start();
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  ({Offset at, double z}) _pos(int i, Size sz) {
+    final a = _t * 0.45 + i * math.pi * 2 / _bubbles.length;
+    return (at: Offset(sz.width / 2 + math.cos(a) * sz.width * 0.43, sz.height / 2 + math.sin(a) * sz.height * 0.3), z: math.sin(a));
+  }
+
+  void _step() {
+    // Land finished flights in the card.
+    _flies.removeWhere((f) {
+      if (_t - f.start < _flyTime) return false;
+      _points += f.amount;
+      _bumpAt = _t;
+      return true;
+    });
+    if (_t - _lastFly > 1.5 && _size != Size.zero) {
+      _lastFly = _t;
+      final front = [for (var i = 0; i < _bubbles.length; i++) if (_pos(i, _size).z > 0.2) i];
+      if (front.isNotEmpty) {
+        final i = front[_rnd.nextInt(front.length)];
+        _flies.add(_Fly(_pos(i, _size).at, _amounts[_rnd.nextInt(_amounts.length)], _t));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final still = MediaQuery.disableAnimationsOf(context);
+    if (still && _ticker.isActive) _ticker.stop();
     final t = Theme.of(context).textTheme;
-    return SizedBox(
-      height: 190,
-      child: Stack(
-        alignment: Alignment.center,
-        clipBehavior: Clip.none,
-        children: [
-          Transform.translate(
-            offset: const Offset(28, -10),
-            child: Transform.rotate(
-              angle: 0.12,
-              child: Container(
-                width: 230,
-                height: 140,
-                decoration: BoxDecoration(color: MkColors.yellow500, borderRadius: MkRadius.all(22)),
-              ),
-            ),
-          ),
-          MkFloat(
-            child: Transform.rotate(
-              angle: -0.1,
-              child: Container(
-                width: 236,
-                height: 146,
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  borderRadius: MkRadius.all(22),
-                  gradient: const RadialGradient(
-                    center: Alignment.topRight,
-                    radius: 1.4,
-                    colors: [MkColors.purple500, MkColors.purple900],
-                    stops: [0, 0.62],
+    return LayoutBuilder(
+      builder: (context, box) {
+        final sz = Size(box.maxWidth, box.maxHeight);
+        _size = sz;
+        if (!still) _step();
+        final cardW = math.min(sz.width * 0.6, sz.height * 0.6 * 1.58);
+        final cardH = cardW / 1.58;
+        final bubble = (sz.height * 0.2).clamp(34.0, 52.0);
+        final bump = Curves.easeOut.transform(((_t - _bumpAt) / 0.5).clamp(0.0, 1.0));
+        final bumpScale = 1 + 0.18 * math.sin(bump * math.pi);
+
+        Widget bubbleAt(int i) {
+          final p = _pos(i, sz);
+          final scale = 0.72 + 0.32 * (p.z + 1) / 2;
+          final (color, ic) = _bubbles[i];
+          return Positioned(
+            left: p.at.dx - bubble / 2,
+            top: p.at.dy - bubble / 2,
+            child: Opacity(
+              opacity: 0.55 + 0.45 * (p.z + 1) / 2,
+              child: Transform.scale(
+                scale: scale,
+                child: Container(
+                  width: bubble,
+                  height: bubble,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 14, offset: Offset(0, 6))],
                   ),
-                  boxShadow: MkShadow.lifted,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Mukafaah', style: t.labelMedium?.copyWith(color: Colors.white70)),
-                    const Spacer(),
-                    Text('2,450', style: t.headlineMedium?.copyWith(color: MkColors.yellow500, fontWeight: FontWeight.w900)),
-                    Text('Gold · 7 shops', style: t.labelSmall?.copyWith(color: Colors.white70)),
-                  ],
+                  child: Icon(ic, color: Colors.white, size: bubble * 0.46),
                 ),
               ),
             ),
-          ),
-          const PositionedDirectional(start: 8, top: 14, child: MkFloat(amplitude: 8, child: MkCoin(size: 38))),
-          const PositionedDirectional(end: 14, bottom: 4, child: MkFloat(amplitude: 5, child: MkCoin(size: 30))),
-        ],
-      ),
+          );
+        }
+
+        final order = [for (var i = 0; i < _bubbles.length; i++) i]..sort((a, b) => _pos(a, sz).z.compareTo(_pos(b, sz).z));
+        final back = order.where((i) => _pos(i, sz).z <= 0);
+        final front = order.where((i) => _pos(i, sz).z > 0);
+        final center = Offset(sz.width / 2, sz.height / 2);
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // Orbit path with a soft golden glow.
+            Center(
+              child: Container(
+                width: sz.width * 0.86,
+                height: sz.height * 0.6,
+                decoration: BoxDecoration(
+                  shape: BoxShape.rectangle,
+                  borderRadius: BorderRadius.all(Radius.elliptical(sz.width * 0.43, sz.height * 0.3)),
+                  border: Border.all(color: MkColors.purple500.withValues(alpha: 0.22), width: 1.5),
+                  gradient: RadialGradient(colors: [MkColors.yellow500.withValues(alpha: 0.18), MkColors.yellow500.withValues(alpha: 0)]),
+                ),
+              ),
+            ),
+            for (final i in back) bubbleAt(i),
+            Center(
+              child: Transform(
+                alignment: Alignment.center,
+                transform: Matrix4.identity()
+                  ..setEntry(3, 2, 0.0014)
+                  ..rotateX(math.cos(_t * 0.55) * 0.16)
+                  ..rotateY(math.sin(_t * 0.7) * 0.28),
+                child: Container(
+                  width: cardW,
+                  height: cardH,
+                  clipBehavior: Clip.antiAlias,
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                  decoration: BoxDecoration(
+                    borderRadius: MkRadius.all(20),
+                    gradient: const RadialGradient(
+                      center: Alignment.topRight,
+                      radius: 1.6,
+                      colors: [Color(0xFF8C5CC4), MkColors.purple700, MkColors.purple900],
+                      stops: [0, 0.35, 0.7],
+                    ),
+                    boxShadow: const [BoxShadow(color: Color(0xCC2C123F), blurRadius: 40, offset: Offset(0, 22), spreadRadius: -18)],
+                  ),
+                  child: Stack(
+                    children: [
+                      // A light that follows the tilt.
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: RadialGradient(
+                              center: Alignment(math.sin(_t * 0.7) * 1.2, -1.2),
+                              radius: 1.1,
+                              colors: [Colors.white.withValues(alpha: 0.26), Colors.white.withValues(alpha: 0)],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Positioned(right: -22, bottom: -30, child: Opacity(opacity: 0.16, child: MkLogo(height: 74, markOnly: true))),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text('Mukafaah', style: t.labelSmall?.copyWith(color: Colors.white70)),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(colors: [Color(0xFFFFE97A), MkColors.yellow500, Color(0xFFE5B800)]),
+                                  borderRadius: MkRadius.all(MkRadius.pill),
+                                ),
+                                child: Text('Gold', style: t.labelSmall?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w900)),
+                              ),
+                            ],
+                          ),
+                          const Spacer(),
+                          Transform.scale(
+                            scale: bumpScale,
+                            alignment: AlignmentDirectional.centerStart,
+                            child: Text(
+                              formatPoints(_points),
+                              textDirection: TextDirection.ltr,
+                              style: t.headlineMedium?.copyWith(color: MkColors.yellow500, fontWeight: FontWeight.w900, height: 1),
+                            ),
+                          ),
+                          Text('pts', style: t.labelSmall?.copyWith(color: Colors.white70)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            for (final i in front) bubbleAt(i),
+            // "+120" chips flying from a shop into the wallet.
+            for (final f in _flies)
+              Builder(
+                builder: (context) {
+                  final p = Curves.easeInOutCubic.transform(((_t - f.start) / _flyTime).clamp(0.0, 1.0));
+                  final at = Offset.lerp(f.from, center, p)! + Offset(0, -math.sin(p * math.pi) * 30);
+                  return Positioned(
+                    left: at.dx - 24,
+                    top: at.dy - 12,
+                    child: Opacity(
+                      opacity: (1 - p * p).clamp(0.0, 1.0),
+                      child: Transform.scale(
+                        scale: 1 - 0.45 * p,
+                        child: Container(
+                          width: 48,
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          decoration: BoxDecoration(color: MkColors.yellow500, borderRadius: MkRadius.all(MkRadius.pill), boxShadow: MkShadow.glow),
+                          child: Text('+${f.amount}', style: t.labelSmall?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w900)),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+          ],
+        );
+      },
     );
   }
 }
