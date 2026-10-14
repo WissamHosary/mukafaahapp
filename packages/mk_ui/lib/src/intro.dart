@@ -1,16 +1,26 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:material_ui/material_ui.dart';
 
-import 'brand.dart';
 import 'tokens.dart';
 
-/// Brand intro shown once over [child] when the app starts (about 2.3 s):
-/// the gold Mukafaah coin pops in with a soft glow, "Mukafaah" is typed letter
-/// by letter with a yellow caret, the Arabic name fades in, then the intro
-/// fades and scales away to reveal the app. A tap skips it. With reduced motion
-/// the logo shows for 400 ms with no typing.
+part 'intro_logo_data.dart';
+
+/// Brand intro shown once over [child] when the app starts (about 3.2 s).
+///
+/// It builds the real Mukafaah logo piece by piece:
+///  1. two sparks trace the outline of the yellow mark from the hook tip and
+///     meet on the far side;
+///  2. the mark fills with yellow and pops, sending out a ripple and sparkles;
+///  3. the Arabic name is revealed right to left, the way it is read, and its
+///     dots and hamza drop into place one by one;
+///  4. MUKAFAAH rises letter by letter;
+///  5. a light sweeps across the whole logo, then the intro fades into the app.
+///
+/// A tap skips straight to the fade. With reduced motion the finished logo is
+/// shown for 600 ms with no animation.
 ///
 /// Use it in `MaterialApp.router(builder: (c, child) => MkIntroGate(child: child!))`.
 class MkIntroGate extends StatefulWidget {
@@ -26,18 +36,13 @@ class MkIntroGate extends StatefulWidget {
 }
 
 class _MkIntroGateState extends State<MkIntroGate> with SingleTickerProviderStateMixin {
-  static const _word = 'Mukafaah';
-  static const _arabic = 'مكافأة';
-  static const _totalMs = 2300;
-
-  // Timeline, as fractions of the whole intro.
-  static const _typeStart = 0.22;
-  static const _typeEnd = 0.60;
-  static const _exitStart = 0.80;
+  /// The logo is complete at this point; after it the intro fades out.
+  static const _showMs = _T.end;
+  static const _exitMs = 450.0;
 
   late final AnimationController _c = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: _totalMs),
+    duration: Duration(milliseconds: (_showMs + _exitMs).round()),
   );
   Timer? _timer;
   bool _done = false;
@@ -60,7 +65,7 @@ class _MkIntroGateState extends State<MkIntroGate> with SingleTickerProviderStat
     _started = true;
     _reduced = MediaQuery.disableAnimationsOf(context);
     if (_reduced) {
-      _timer = Timer(const Duration(milliseconds: 400), _finish);
+      _timer = Timer(const Duration(milliseconds: 600), _finish);
     } else {
       _c.forward();
     }
@@ -77,7 +82,8 @@ class _MkIntroGateState extends State<MkIntroGate> with SingleTickerProviderStat
       _finish();
       return;
     }
-    if (_c.value < _exitStart) _c.forward(from: _exitStart);
+    final exitAt = _showMs / (_showMs + _exitMs);
+    if (_c.value < exitAt) _c.forward(from: exitAt);
   }
 
   @override
@@ -91,7 +97,6 @@ class _MkIntroGateState extends State<MkIntroGate> with SingleTickerProviderStat
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
-      alignment: Alignment.center,
       children: [
         widget.child,
         if (!_done)
@@ -103,29 +108,23 @@ class _MkIntroGateState extends State<MkIntroGate> with SingleTickerProviderStat
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _skip,
-                child: _reduced
-                    ? const _IntroFrame(logo: 1, letters: _word.length, fade: 0, arabic: 1, exit: 0, ring: 0, caretOn: false)
-                    : AnimatedBuilder(
-                        animation: _c,
-                        builder: (context, _) {
-                          final t = _c.value;
-                          double seg(double a, double b, [Curve curve = Curves.linear]) =>
-                              curve.transform(((t - a) / (b - a)).clamp(0.0, 1.0));
-                          final typed = seg(_typeStart, _typeEnd) * _word.length;
-                          final letters = typed.floor().clamp(0, _word.length);
-                          final elapsedMs = (t * _totalMs).round();
-                          return _IntroFrame(
-                            logo: seg(0.04, 0.30, Curves.easeOutBack),
-                            ring: seg(0.10, 0.55, Curves.easeOutCubic),
-                            letters: letters,
-                            fade: letters >= _word.length ? 0 : typed - letters,
-                            arabic: seg(0.58, 0.74, Curves.easeOutCubic),
-                            exit: seg(_exitStart, 1, Curves.easeInCubic),
-                            // Solid while typing, then a slow blink.
-                            caretOn: t < _typeEnd || (elapsedMs ~/ 420).isEven,
-                          );
-                        },
+                child: AnimatedBuilder(
+                  animation: _c,
+                  builder: (context, _) {
+                    final ms = _reduced ? _showMs : _c.value * (_showMs + _exitMs);
+                    final exit = Curves.easeInCubic.transform(((ms - _showMs) / _exitMs).clamp(0.0, 1.0));
+                    return Opacity(
+                      opacity: 1 - exit,
+                      child: ColoredBox(
+                        color: _bg,
+                        child: Transform.scale(
+                          scale: 1 + 0.08 * exit,
+                          child: CustomPaint(painter: _LogoPainter(ms), size: Size.infinite),
+                        ),
                       ),
+                    );
+                  },
+                ),
               ),
             ),
           ),
@@ -134,171 +133,299 @@ class _MkIntroGateState extends State<MkIntroGate> with SingleTickerProviderStat
   }
 }
 
-/// One frame of the intro. All values are 0..1 except [letters].
-class _IntroFrame extends StatelessWidget {
-  const _IntroFrame({
-    required this.logo,
-    required this.letters,
-    required this.fade,
-    required this.arabic,
-    required this.exit,
-    required this.ring,
-    required this.caretOn,
-  });
+const _bg = Color(0xFFFBFAFD);
+const _yellow = MkColors.yellow500;
+const _purple = MkColors.purple900;
 
-  final double logo;
-  final int letters;
-
-  /// Opacity of the letter being typed right now.
-  final double fade;
-  final double arabic;
-  final double exit;
-  final double ring;
-  final bool caretOn;
-
-  @override
-  Widget build(BuildContext context) {
-    const word = _MkIntroGateState._word;
-    final base = Theme.of(context).textTheme.displaySmall ?? const TextStyle(fontSize: 34);
-    final wordStyle = base.copyWith(
-      color: Colors.white,
-      fontSize: 40,
-      fontWeight: FontWeight.w800,
-      letterSpacing: -0.6,
-      height: 1.1,
-      decoration: TextDecoration.none,
-    );
-    final hidden = wordStyle.copyWith(color: Colors.transparent);
-    final caret = Container(
-      width: 3,
-      height: 38,
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      decoration: BoxDecoration(
-        color: caretOn ? MkColors.yellow500 : Colors.transparent,
-        borderRadius: MkRadius.all(2),
-        boxShadow: caretOn ? const [BoxShadow(color: Color(0x88FBD404), blurRadius: 10)] : null,
-      ),
-    );
-    final logoScale = 0.55 + 0.45 * logo;
-
-    return Opacity(
-      opacity: (1 - exit).clamp(0.0, 1.0),
-      child: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(0, -0.25),
-            radius: 1.15,
-            colors: [MkColors.purple700, MkColors.purple900],
-            stops: [0, 0.75],
-          ),
-        ),
-        child: DefaultTextStyle(
-          style: wordStyle,
-          child: Transform.scale(
-            scale: 1 + 0.12 * exit,
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 220,
-                    height: 180,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        // Soft glow behind the coin.
-                        Opacity(
-                          opacity: logo.clamp(0.0, 1.0),
-                          child: Container(
-                            width: 200,
-                            height: 200,
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: RadialGradient(colors: [Color(0x66FBD404), Color(0x00FBD404)]),
-                            ),
-                          ),
-                        ),
-                        // A ring that ripples out once as the coin lands.
-                        CustomPaint(size: const Size(220, 180), painter: _RingPainter(ring)),
-                        Opacity(
-                          opacity: logo.clamp(0.0, 1.0),
-                          child: Transform.scale(scale: logoScale, child: const MkCoin(size: 96)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: MkSpace.sm),
-                  Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(text: word.substring(0, letters)),
-                        if (letters < word.length)
-                          TextSpan(
-                            text: word.substring(letters, letters + 1),
-                            style: wordStyle.copyWith(color: Colors.white.withValues(alpha: fade.clamp(0.0, 1.0))),
-                          ),
-                        WidgetSpan(alignment: PlaceholderAlignment.middle, child: caret),
-                        if (letters + 1 < word.length) TextSpan(text: word.substring(letters + 1), style: hidden),
-                      ],
-                    ),
-                    textDirection: TextDirection.ltr,
-                    textAlign: TextAlign.center,
-                    style: wordStyle,
-                  ),
-                  const SizedBox(height: MkSpace.xs),
-                  Opacity(
-                    opacity: arabic.clamp(0.0, 1.0),
-                    child: Transform.translate(
-                      offset: Offset(0, 10 * (1 - arabic)),
-                      child: Text(
-                        _MkIntroGateState._arabic,
-                        textDirection: TextDirection.rtl,
-                        style: wordStyle.copyWith(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0,
-                          color: MkColors.yellow500,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+/// The intro timeline, in milliseconds.
+abstract final class _T {
+  // 1. Sparks trace the mark's outline.
+  static const traceStart = 0.0;
+  static const traceEnd = 900.0;
+  // 2. The mark fills and pops.
+  static const fillStart = 760.0;
+  static const fillEnd = 1180.0;
+  static const popEnd = 1300.0;
+  static const rippleEnd = 1560.0;
+  // 3. Arabic name, right to left, then its dots.
+  static const arabicStart = 1040.0;
+  static const arabicEnd = 1720.0;
+  static const dotsStart = 1540.0;
+  static const dotGap = 85.0;
+  static const dotDur = 420.0;
+  // 4. MUKAFAAH, letter by letter.
+  static const latinStart = 1420.0;
+  static const latinGap = 80.0;
+  static const latinDur = 420.0;
+  // 5. A light sweeps across.
+  static const shineStart = 2200.0;
+  static const shineEnd = 2800.0;
+  static const end = 3150.0;
 }
 
-class _RingPainter extends CustomPainter {
-  _RingPainter(this.t);
+double _seg(double ms, double a, double b, [Curve curve = Curves.linear]) =>
+    curve.transform(((ms - a) / (b - a)).clamp(0.0, 1.0));
 
-  final double t;
+/// The logo artwork is 600 x 606; the mark's centre is about here.
+const _markCentre = Offset(296, 148);
+
+class _Shape {
+  const _Shape(this.contours, this.bounds);
+
+  /// Each contour is x, y pairs. The first is the outline, any others are holes.
+  final List<List<double>> contours;
+
+  /// left, top, right, bottom
+  final List<double> bounds;
+}
+
+/// Turns traced points into a smooth closed path: a quadratic curve through
+/// the midpoints of each pair of points.
+void _addContour(Path path, List<double> p) {
+  final n = p.length ~/ 2;
+  Offset at(int i) => Offset(p[(i % n) * 2], p[(i % n) * 2 + 1]);
+  Offset mid(int i) => Offset.lerp(at(i), at(i + 1), 0.5)!;
+  final start = mid(n - 1);
+  path.moveTo(start.dx, start.dy);
+  for (var i = 0; i < n; i++) {
+    final c = at(i);
+    final m = mid(i);
+    path.quadraticBezierTo(c.dx, c.dy, m.dx, m.dy);
+  }
+  path.close();
+}
+
+Path _pathOf(_Shape s) {
+  final path = Path()..fillType = ui.PathFillType.evenOdd;
+  for (final c in s.contours) {
+    _addContour(path, c);
+  }
+  return path;
+}
+
+/// Paths are built once and reused for every frame.
+final class _Art {
+  _Art._();
+  static final instance = _Art._();
+
+  final Path mark = _pathOf(_mark.first);
+  late final Path markOutline = Path().._addOutline(_mark.first.contours.first);
+  late final ui.PathMetric outlineMetric = markOutline.computeMetrics().first;
+  final List<Path> arabicBody = _arabicBody.map(_pathOf).toList();
+  final List<Path> arabicDots = _arabicDots.map(_pathOf).toList();
+  final List<Path> latin = _latin.map(_pathOf).toList();
+
+  late final Path all = () {
+    final p = Path()..fillType = ui.PathFillType.evenOdd;
+    for (final x in [mark, ...arabicBody, ...arabicDots, ...latin]) {
+      p.addPath(x, Offset.zero);
+    }
+    return p;
+  }();
+}
+
+extension on Path {
+  void _addOutline(List<double> points) => _addContour(this, points);
+}
+
+class _LogoPainter extends CustomPainter {
+  _LogoPainter(this.ms);
+
+  /// Time since the intro started.
+  final double ms;
+
+  static const _artW = 600.0;
+  static const _artH = 606.0;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (t <= 0 || t >= 1) return;
-    final c = size.center(Offset.zero);
-    final r = 46 + 64 * t;
-    final alpha = (1 - t) * 0.55;
-    canvas.drawCircle(
-      c,
-      r,
-      Paint()
+    final art = _Art.instance;
+    final w = math.min(size.width * 0.72, 320.0);
+    final k = w / _artW;
+
+    canvas
+      ..save()
+      ..translate(size.width / 2, size.height * 0.47)
+      ..scale(k)
+      ..translate(-_artW / 2, -_artH / 2);
+
+    _paintMark(canvas, art);
+    _paintArabic(canvas, art);
+    _paintLatin(canvas, art);
+    _paintShine(canvas, art);
+
+    canvas.restore();
+  }
+
+  void _paintMark(Canvas canvas, _Art art) {
+    final trace = _seg(ms, _T.traceStart, _T.traceEnd, Curves.easeInOutCubic);
+    final fill = _seg(ms, _T.fillStart, _T.fillEnd, Curves.easeOutCubic);
+    final pop = math.sin(math.pi * _seg(ms, _T.fillStart, _T.popEnd));
+    final ripple = _seg(ms, _T.fillStart + 80, _T.rippleEnd, Curves.easeOutCubic);
+
+    // A soft glow that blooms with the fill and stays behind the mark.
+    if (fill > 0) {
+      canvas.drawCircle(
+        _markCentre,
+        250,
+        Paint()
+          ..shader = ui.Gradient.radial(_markCentre, 250, [
+            _yellow.withValues(alpha: 0.14 * fill),
+            _yellow.withValues(alpha: 0),
+          ]),
+      );
+    }
+
+    // Ripple ring and sparkles as the mark lands.
+    if (ripple > 0 && ripple < 1) {
+      final fade = 1 - ripple;
+      canvas.drawCircle(
+        _markCentre,
+        150 + 190 * ripple,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5 + 7 * fade
+          ..color = _yellow.withValues(alpha: 0.55 * fade),
+      );
+      for (var i = 0; i < 10; i++) {
+        final a = (i * 36 + 18) * math.pi / 180;
+        final d = 165 + 175 * ripple;
+        final c = _markCentre + Offset(math.cos(a) * d, math.sin(a) * d * 0.9);
+        _sparkle(canvas, c, 9 * fade + 1, (i.isEven ? _yellow : _purple).withValues(alpha: fade * (i.isEven ? 1 : 0.55)));
+      }
+    }
+
+    // The outline being traced from the hook tip by two sparks.
+    if (trace > 0 && fill < 1) {
+      final m = art.outlineMetric;
+      final len = m.length;
+      final half = trace * len / 2;
+      final stroke = Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2 + 4 * (1 - t)
-        ..color = MkColors.yellow500.withValues(alpha: alpha),
-    );
-    // A few sparks riding the ring.
-    final spark = Paint()..color = Colors.white.withValues(alpha: alpha);
-    for (var i = 0; i < 6; i++) {
-      final a = i * math.pi / 3 + t * 0.8;
-      canvas.drawCircle(c + Offset(math.cos(a) * r, math.sin(a) * r), 2.2 * (1 - t) + 0.6, spark);
+        ..strokeWidth = 9
+        ..strokeCap = ui.StrokeCap.round
+        ..strokeJoin = ui.StrokeJoin.round
+        ..color = _yellow.withValues(alpha: 1 - fill);
+      canvas
+        ..drawPath(m.extractPath(0, half), stroke)
+        ..drawPath(m.extractPath(len - half, len), stroke);
+      if (trace < 1) {
+        for (final at in [half, len - half]) {
+          final p = m.getTangentForOffset(at)?.position;
+          if (p == null) continue;
+          canvas
+            ..drawCircle(p, 22, Paint()..color = _yellow.withValues(alpha: 0.35)..maskFilter = const ui.MaskFilter.blur(ui.BlurStyle.normal, 10))
+            ..drawCircle(p, 9, Paint()..color = _yellow)
+            ..drawCircle(p, 4.5, Paint()..color = Colors.white);
+        }
+      }
+    }
+
+    // The filled mark, popping slightly as it lands.
+    if (fill > 0) {
+      canvas
+        ..save()
+        ..translate(_markCentre.dx, _markCentre.dy)
+        ..scale(1 + 0.07 * pop)
+        ..translate(-_markCentre.dx, -_markCentre.dy)
+        ..drawPath(art.mark, Paint()..color = _yellow.withValues(alpha: fill))
+        ..restore();
     }
   }
 
+  void _paintArabic(Canvas canvas, _Art art) {
+    final p = _seg(ms, _T.arabicStart, _T.arabicEnd, Curves.easeInOutCubic);
+    if (p > 0) {
+      const feather = 70.0;
+      // The reveal edge moves from the right of the word to the left.
+      final edge = _artW + feather - (_artW + 2 * feather) * p;
+      const bounds = Rect.fromLTRB(0, 300, _artW, 520);
+      canvas
+        ..saveLayer(bounds, Paint())
+        ..translate(0, 12 * (1 - p));
+      final ink = Paint()..color = _purple;
+      for (final path in art.arabicBody) {
+        canvas.drawPath(path, ink);
+      }
+      canvas
+        ..translate(0, -12 * (1 - p))
+        ..drawRect(
+          bounds,
+          Paint()
+            ..blendMode = ui.BlendMode.dstIn
+            ..shader = ui.Gradient.linear(
+              Offset(edge - feather, 0),
+              Offset(edge + feather, 0),
+              [const Color(0x00000000), const Color(0xFF000000)],
+            ),
+        )
+        ..restore();
+    }
+
+    for (var i = 0; i < art.arabicDots.length; i++) {
+      final start = _T.dotsStart + i * _T.dotGap;
+      final d = _seg(ms, start, start + _T.dotDur, Curves.easeOutBack);
+      final o = _seg(ms, start, start + _T.dotDur * 0.5);
+      if (o <= 0) continue;
+      canvas
+        ..save()
+        ..translate(0, -40 * (1 - d))
+        ..drawPath(art.arabicDots[i], Paint()..color = _purple.withValues(alpha: o))
+        ..restore();
+    }
+  }
+
+  void _paintLatin(Canvas canvas, _Art art) {
+    for (var i = 0; i < art.latin.length; i++) {
+      final start = _T.latinStart + i * _T.latinGap;
+      final q = _seg(ms, start, start + _T.latinDur, Curves.easeOutBack);
+      final o = _seg(ms, start, start + _T.latinDur * 0.6);
+      if (o <= 0) continue;
+      canvas
+        ..save()
+        ..translate(0, 28 * (1 - q))
+        ..drawPath(art.latin[i], Paint()..color = _purple.withValues(alpha: o))
+        ..restore();
+    }
+  }
+
+  /// A light band sweeping across the finished logo, only over its shapes.
+  void _paintShine(Canvas canvas, _Art art) {
+    final s = _seg(ms, _T.shineStart, _T.shineEnd, Curves.easeInOutSine);
+    if (s <= 0 || s >= 1) return;
+    const bounds = Rect.fromLTRB(-20, -20, _artW + 20, _artH + 20);
+    final x = -260 + (_artW + 520) * s;
+    // Tilted about 20 degrees.
+    const tilt = 0.36;
+    canvas
+      ..saveLayer(bounds, Paint())
+      ..drawPath(art.all, Paint()..color = Colors.white)
+      ..drawRect(
+        bounds,
+        Paint()
+          ..blendMode = ui.BlendMode.srcIn
+          ..shader = ui.Gradient.linear(
+            Offset(x - 70, -70 * tilt),
+            Offset(x + 70, 70 * tilt),
+            [Colors.white.withValues(alpha: 0), Colors.white.withValues(alpha: 0.6), Colors.white.withValues(alpha: 0)],
+            [0, 0.5, 1],
+          ),
+      )
+      ..restore();
+  }
+
+  /// A small four-pointed star.
+  void _sparkle(Canvas canvas, Offset c, double r, Color color) {
+    final p = Path()
+      ..moveTo(c.dx, c.dy - r)
+      ..quadraticBezierTo(c.dx, c.dy, c.dx + r, c.dy)
+      ..quadraticBezierTo(c.dx, c.dy, c.dx, c.dy + r)
+      ..quadraticBezierTo(c.dx, c.dy, c.dx - r, c.dy)
+      ..quadraticBezierTo(c.dx, c.dy, c.dx, c.dy - r)
+      ..close();
+    canvas.drawPath(p, Paint()..color = color);
+  }
+
   @override
-  bool shouldRepaint(_RingPainter old) => old.t != t;
+  bool shouldRepaint(_LogoPainter old) => old.ms != ms;
 }
