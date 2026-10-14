@@ -266,6 +266,30 @@ class BusinessApi {
     return [for (final s in d['staff'] as List) (id: (s as Json)['id'] as String, name: s['name'] as String)];
   }
 
+  /// Username and password from Mukafaah. Owners get a normal session (saved);
+  /// workers get a 12-hour counter session ([staff] is set).
+  Future<({StaffSession? staff, int expiresInSec, String? businessName, String? branchName})> businessLogin(
+    String username,
+    String password,
+  ) async {
+    final d = await client.post<Json>(
+      '/v1/auth/business/login',
+      auth: false,
+      data: {'username': username.trim(), 'password': password, 'deviceLabel': 'Mukafaah Business'},
+    );
+    if (d['kind'] == 'OWNER') {
+      await client.store.saveTokens(access: d['accessToken'] as String, refresh: d['refreshToken'] as String);
+      return (staff: null, expiresInSec: 0, businessName: d['businessName'] as String?, branchName: null);
+    }
+    final st = d['staff'] as Json;
+    return (
+      staff: StaffSession(token: d['accessToken'] as String, id: st['id'] as String, name: st['name'] as String, canRedeem: st['canRedeem'] == true),
+      expiresInSec: _i(d['expiresInSec']),
+      businessName: d['businessName'] as String?,
+      branchName: d['branchName'] as String?,
+    );
+  }
+
   Future<StaffSession> staffLogin(DeviceCreds dev, String staffId, String pin) async {
     final d = await client.post<Json>(
       '/v1/business/cashier/login',

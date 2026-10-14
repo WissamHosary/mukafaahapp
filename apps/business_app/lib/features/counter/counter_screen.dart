@@ -634,9 +634,9 @@ class _CounterScreenState extends ConsumerState<CounterScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(session.device?.businessName ?? '', style: t.titleSmall?.copyWith(color: Colors.white)),
+                  Text(session.device?.businessName ?? session.workerShop ?? '', style: t.titleSmall?.copyWith(color: Colors.white)),
                   Text(
-                    '${session.device?.branchName ?? ''} · ${session.staff?.name ?? ''}',
+                    [session.device?.branchName ?? session.workerBranch, session.staff?.name].whereType<String>().where((x) => x.isNotEmpty).join(' · '),
                     style: t.bodySmall?.copyWith(color: const Color(0xFFD8CCE6)),
                   ),
                 ],
@@ -650,9 +650,10 @@ class _CounterScreenState extends ConsumerState<CounterScreen> {
               label: Text(strings.myShift),
             ),
             IconButton(
-              tooltip: strings.lock,
+              // A worker on their own phone signs out; a shared counter just locks.
+              tooltip: session.mode == AppMode.worker ? strings.tr('تسجيل خروج', 'Sign out') : strings.lock,
               onPressed: () => ref.read(sessionProvider.notifier).lockCounter(),
-              icon: const Icon(Icons.lock_rounded, color: MkColors.yellow500),
+              icon: Icon(session.mode == AppMode.worker ? Icons.logout_rounded : Icons.lock_rounded, color: MkColors.yellow500),
             ),
           ],
         ),

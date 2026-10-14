@@ -44,6 +44,8 @@
     plus: '<path d="M12 5v14M5 12h14"/>',
     x: '<path d="M18 6L6 18M6 6l12 12"/>',
     check: '<path d="M20 6L9 17l-5-5"/>',
+    refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
     trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/>',
@@ -604,41 +606,181 @@
     const m = String(s || '').match(/(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})/) || String(s || '').match(/@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/);
     return m ? [Number(m[1]), Number(m[2])] : null;
   }
-  async function addShop() {
+  function addShop() { location.hash = 'newshop'; }
+
+  // ---------- Logins: helpers shared by New shop and Team & logins ----------
+  /** A readable random password: no 0/O or 1/l/I, at least one digit. */
+  function genPassword() {
+    const L = 'abcdefghjkmnpqrstuvwxyz', U = 'ABCDEFGHJKMNPQRSTUVWXYZ', D = '23456789';
+    const r = (set) => set[crypto.getRandomValues(new Uint32Array(1))[0] % set.length];
+    return r(U) + r(L) + r(L) + r(L) + '-' + r(U) + r(L) + r(L) + r(L) + '-' + r(D) + r(D);
+  }
+  /** "Cedar Café" + "rami" → "cedar.cafe.rami" (what Mukafaah usernames look like). */
+  function slug(...parts) {
+    return parts.filter(Boolean).join(' ').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '').slice(0, 32) || '';
+  }
+  const USER_RE = /^[a-z0-9][a-z0-9._-]{2,31}$/;
+  /** Live "available / taken" note under a username field. */
+  function wireUsername(input, note) {
+    let t = null;
+    const check = () => {
+      const v = input.value.trim().toLowerCase();
+      if (!v) { note.textContent = ''; note.className = 'unote'; return; }
+      if (!USER_RE.test(v)) { note.textContent = '3 to 32 English letters, numbers, dot, dash or underscore'; note.className = 'unote bad'; return; }
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        try { const r = await api('GET', '/v1/admin/logins/check?username=' + encodeURIComponent(v)); if (input.value.trim().toLowerCase() !== v) return; note.textContent = r.available ? 'Available' : 'Already used, try another'; note.className = 'unote ' + (r.available ? 'ok' : 'bad'); } catch { /* offline: the server checks again on save */ }
+      }, 350);
+    };
+    input.addEventListener('input', check);
+    check();
+  }
+  const pwField = (name, value, label = 'Password') => `<label class="f"><span>${esc(label)}</span><div class="pw"><input class="in mono" name="${name}" value="${esc(value)}" minlength="8" maxlength="72" autocomplete="new-password" spellcheck="false"><button type="button" class="btn ghost sm" data-gen="${name}" title="New random password">${ic('refresh', 'sm')}</button><button type="button" class="btn ghost sm" data-copy="${name}" title="Copy">${ic('copy', 'sm')}</button></div></label>`;
+  function wirePw(root) {
+    root.addEventListener('click', async (e) => {
+      const g = e.target.closest('[data-gen]'); if (g) { root.querySelector(`[name="${g.dataset.gen}"]`).value = genPassword(); return; }
+      const c = e.target.closest('[data-copy]'); if (c) { const v = root.querySelector(`[name="${c.dataset.copy}"]`).value; try { await navigator.clipboard.writeText(v); toast('Copied'); } catch { toast('Select the text and copy it', true); } }
+    });
+  }
+  /** Shows the new logins once so they can be given to the shop. */
+  function showCredentials(shopName, list, after) {
+    const text = [`Mukafaah Business: ${shopName}`, ...list.map((x) => `${x.role}: ${x.name ? x.name + ' · ' : ''}username ${x.username} · password ${x.password}`), 'Download "Mukafaah Business" and sign in with these.'].join('\n');
+    const f = modal('Logins ready', `
+      <div class="alert info">${ic('info', 'sm')}<div>Give these to the shop. For safety, passwords are shown only now. You can set a new one any time in Team &amp; logins.</div></div>
+      <div class="creds">${list.map((x) => `<div class="cred"><span class="role ${x.role === 'Owner' ? 'o' : ''}">${esc(x.role)}</span><b>${esc(x.name || '')}</b><div class="kv"><small>Username</small><code>${esc(x.username)}</code></div><div class="kv"><small>Password</small><code>${esc(x.password)}</code></div></div>`).join('')}</div>
+      <button type="button" class="btn sec" id="copyAll" style="width:100%">${ic('copy', 'sm')} Copy all</button>`,
+    async () => { if (after) after(); }, { save: 'Done' });
+    $('#copyAll', f).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied. Paste it in WhatsApp to the owner.'); } catch { toast('Couldn’t copy here', true); } };
+  }
+
+  // ---------- New shop: everything in one page ----------
+  async function pageNewShop() {
+    crumbs([['Shops', '#shops'], ['New shop']]);
     if (!S.categories.length) await loadCategories();
-    modal('Add a shop', `
-      <div class="alert info">${ic('info', 'sm')}<div>The owner signs in to the Business app with this phone number. Nothing to sign up on their side.</div></div>
-      <label class="f"><span>Shop name</span><input class="in" name="name" maxlength="80" required></label>
-      <div class="fgrid">
-        <label class="f"><span>Category</span><select class="in" name="category">${S.categories.filter((c) => c.active).map((c) => opt(c.key, c.nameEn, '')).join('')}</select></label>
-        <label class="f"><span>Points back</span><span class="pct" style="width:100%"><input class="in" type="number" name="earnPercent" min="0" max="100" value="10" style="width:100%"></span></label>
-        <label class="f"><span>Owner phone</span><div class="phone-in sm"><span class="cc">${flag}+961</span><input name="ownerPhone" inputmode="tel" placeholder="70 123 456" required></div></label>
-        <label class="f"><span>Owner name</span><input class="in" name="ownerName" maxlength="60"></label>
-        <label class="f"><span>City</span><input class="in" name="city" maxlength="60" placeholder="Beirut"></label>
-        <label class="f"><span>Area / street</span><input class="in" name="address" maxlength="160" placeholder="Hamra"></label>
-        <label class="f"><span>WhatsApp for orders</span><input class="in" name="whatsapp" inputmode="tel" placeholder="+961 …"></label>
-        <label class="f"><span>Instagram</span><input class="in" name="instagram" maxlength="60"></label>
-      </div>
-      <label class="f"><span>Location</span><input class="in" name="loc" placeholder='Google Maps link or "33.8966, 35.4823"'><em>Used for the map in the customer app.</em></label>
-      <label class="f"><span>About the shop</span><textarea class="in" name="description" maxlength="600"></textarea></label>
-      <div class="optcard hl"><div class="swrow">${toggle('managerAccess', false)}<div class="t"><b>Give the owner a Manager account</b><small>They can sign in here too, and only see their own shop: profile, offers, store, orders, bills and its monthly report.</small></div></div></div>`,
-    async (f) => {
+    let workers = [];
+    const v = mount(ph('New shop', 'Set up everything here: the shop, its photos, the owner’s login, the workers and the online store. The shop just signs in.') + `
+      <form class="newshop" id="ns" novalidate>
+        <div class="ns-main">
+          <section class="card"><div class="card-h"><span class="stepn">1</span><h3>The shop</h3></div><div class="card-b">
+            <label class="f"><span>Shop name</span><input class="in" name="name" maxlength="80" required placeholder="Cedar Cafe"></label>
+            <div class="fgrid">
+              <label class="f"><span>Category</span><select class="in" name="category">${S.categories.filter((c) => c.active).map((c) => opt(c.key, c.nameEn, '')).join('')}</select></label>
+              <label class="f"><span>Points back</span><span class="pct" style="width:100%"><input class="in" type="number" name="earnPercent" min="0" max="100" value="10" style="width:100%"></span></label>
+            </div>
+            <div class="fgrid imgs">
+              ${dropHtml('logoMediaId', '', 'Logo', 'Square, at least 400 × 400')}
+              ${dropHtml('coverMediaId', '', 'Banner (cover photo)', 'Wide, about 1600 × 900')}
+            </div>
+            <label class="f"><span>About the shop</span><textarea class="in" name="description" maxlength="600" placeholder="What they sell, what makes them special"></textarea></label>
+            <div class="fgrid">
+              <label class="f"><span>City</span><input class="in" name="city" maxlength="60" placeholder="Beirut"></label>
+              <label class="f"><span>Area / street</span><input class="in" name="address" maxlength="160" placeholder="Hamra"></label>
+              <label class="f"><span>WhatsApp</span><input class="in" name="whatsapp" inputmode="tel" placeholder="+961 …"></label>
+              <label class="f"><span>Instagram</span><input class="in" name="instagram" maxlength="60" placeholder="@cedarcafe"></label>
+            </div>
+            <label class="f"><span>Location</span><input class="in" name="loc" placeholder='Google Maps link or "33.8966, 35.4823"'><em>Puts the shop on the map and in “Near you”.</em></label>
+            <div class="optcard"><div class="swrow">${toggle('featured', false)}<div class="t"><b>Featured</b><small>Shows in Featured shops on the home page.</small></div></div></div>
+          </div></section>
+
+          <section class="card"><div class="card-h"><span class="stepn">2</span><h3>Owner</h3></div><div class="card-b">
+            <div class="fgrid">
+              <label class="f"><span>Owner name</span><input class="in" name="ownerName" maxlength="60" placeholder="Rami Haddad"></label>
+              <label class="f"><span>Owner phone</span><div class="phone-in sm"><span class="cc">${flag}+961</span><input name="ownerPhone" inputmode="tel" placeholder="70 123 456" required></div></label>
+              <label class="f"><span>Username for Mukafaah Business</span><input class="in mono" name="ownerUsername" maxlength="32" autocomplete="off" spellcheck="false"><small class="unote" id="un-owner"></small></label>
+              ${pwField('ownerPassword', genPassword())}
+            </div>
+            <div class="optcard hl"><div class="swrow">${toggle('managerAccess', false)}<div class="t"><b>Also give the owner a Manager account</b><small>They can sign in here too and only see their own shop.</small></div></div></div>
+          </div></section>
+
+          <section class="card"><div class="card-h"><span class="stepn">3</span><h3>Workers</h3><span class="sp"></span><button type="button" class="btn sec sm" id="addW">${ic('plus', 'sm')} Add worker</button></div><div class="card-b">
+            <p class="muted" style="margin:0 0 10px">Each worker signs in to Mukafaah Business with their own username and lands on the counter: give points, scan QR, redeem.</p>
+            <div id="wl"></div>
+          </div></section>
+
+          <section class="card"><div class="card-h"><span class="stepn">4</span><h3>Online store</h3></div><div class="card-b">
+            <div class="optcard"><div class="swrow">${toggle('storeEnabled', false)}<div class="t"><b>Sell online on Mukafaah</b><small>Turns on the shop’s store in the app. After saving you go straight to Online store to add sections and products.</small></div></div></div>
+          </div></section>
+        </div>
+        <aside class="ns-side"><div class="card sticky-col">
+          <div class="ns-pv" id="nspv"></div>
+          <button class="btn" type="submit" style="width:100%">${ic('check', 'sm')} Create shop</button>
+          <p class="muted" style="font-size:12.5px;margin:8px 0 0">You’ll see all logins once after saving, ready to send to the shop.</p>
+        </div></aside>
+      </form>`);
+    const f = $('#ns', v);
+    wireDrop(f, 'logoMediaId', 512); wireDrop(f, 'coverMediaId', 1600);
+    wirePw(f);
+    wireUsername(f.elements.ownerUsername, $('#un-owner', f));
+    let ownerTouched = false;
+    f.elements.ownerUsername.addEventListener('input', () => (ownerTouched = true));
+    const drawWorkers = () => {
+      $('#wl', f).innerHTML = workers.length ? workers.map((w, i) => `<div class="wrow" data-i="${i}">
+        <label class="f"><span>Name</span><input class="in" data-w="name" value="${esc(w.name)}" maxlength="60" placeholder="Worker name"></label>
+        <label class="f"><span>Username</span><input class="in mono" data-w="username" value="${esc(w.username)}" maxlength="32" spellcheck="false"><small class="unote" data-un></small></label>
+        <label class="f"><span>Password</span><div class="pw"><input class="in mono" data-w="password" value="${esc(w.password)}" spellcheck="false"><button type="button" class="btn ghost sm" data-wgen title="New password">${ic('refresh', 'sm')}</button></div></label>
+        <button type="button" class="btn ghost icon sm" data-wdel aria-label="Remove worker">${ic('trash', 'sm')}</button></div>`).join('') : `<div class="empty-s muted">No workers yet. The owner can also use the counter from their own login.</div>`;
+      $$('.wrow', f).forEach((row) => wireUsername($('[data-w="username"]', row), $('[data-un]', row)));
+      preview();
+    };
+    $('#addW', f).onclick = () => { workers.push({ name: '', username: '', password: genPassword(), touched: false }); drawWorkers(); $$('.wrow [data-w="name"]', f).pop()?.focus(); };
+    $('#wl', f).addEventListener('input', (e) => {
+      const row = e.target.closest('.wrow'); if (!row) return; const w = workers[Number(row.dataset.i)]; const k = e.target.dataset.w;
+      w[k] = e.target.value;
+      if (k === 'username') w.touched = true;
+      if (k === 'name' && !w.touched) { w.username = slug(val(f, 'name').split(' ')[0], w.name.split(' ')[0]); const u = $('[data-w="username"]', row); u.value = w.username; u.dispatchEvent(new Event('input')); }
+      preview();
+    });
+    $('#wl', f).addEventListener('click', (e) => {
+      const row = e.target.closest('.wrow'); if (!row) return; const i = Number(row.dataset.i);
+      if (e.target.closest('[data-wdel]')) { workers.splice(i, 1); drawWorkers(); }
+      if (e.target.closest('[data-wgen]')) { workers[i].password = genPassword(); $('[data-w="password"]', row).value = workers[i].password; }
+    });
+    function preview() {
+      const logo = $('[data-drop=logoMediaId] img', f)?.getAttribute('src'); const cover = $('[data-drop=coverMediaId] img', f)?.getAttribute('src');
+      const name = val(f, 'name') || 'Shop name';
+      $('#nspv', f).innerHTML = `<span class="lbl">In the app</span><div class="pvshop"><div class="cv" ${cover ? `style="background-image:url('${esc(cover)}')"` : ''}><span class="lg">${logo ? `<img src="${esc(logo)}" alt="">` : esc(initials(name))}</span><span class="bk">${esc(val(f, 'earnPercent') || 0)}% back</span></div><div class="bd"><b>${esc(name)}</b><small>${esc([catName(val(f, 'category')), val(f, 'city')].filter(Boolean).join(' · '))}</small></div></div>
+        <ul class="nschk"><li class="${val(f, 'name') ? 'ok' : ''}">Name</li><li class="${logo ? 'ok' : ''}">Logo</li><li class="${cover ? 'ok' : ''}">Banner</li><li class="${val(f, 'ownerPhone') ? 'ok' : ''}">Owner phone</li><li class="${val(f, 'ownerUsername') ? 'ok' : ''}">Owner login</li><li class="ok">${workers.length} worker${workers.length === 1 ? '' : 's'}</li><li class="${f.elements.storeEnabled.checked ? 'ok' : ''}">Online store ${f.elements.storeEnabled.checked ? 'on' : 'off'}</li></ul>`;
+    }
+    f.addEventListener('input', (e) => {
+      if (e.target.name === 'name' && !ownerTouched) { f.elements.ownerUsername.value = slug(val(f, 'name')); f.elements.ownerUsername.dispatchEvent(new Event('input')); ownerTouched = false; }
+      preview();
+    });
+    f.addEventListener('change', preview);
+    drawWorkers();
+    f.onsubmit = async (e) => {
+      e.preventDefault();
       const ll = parseLatLng(val(f, 'loc'));
-      if (val(f, 'loc') && !ll) { toast('Couldn’t read that location. Paste a Google Maps link or "lat, lng".', true); return false; }
+      if (val(f, 'loc') && !ll) { toast('Couldn’t read that location. Paste a Google Maps link or "lat, lng".', true); return; }
+      if (!val(f, 'name') || !val(f, 'ownerPhone')) { toast('Add the shop name and the owner’s phone.', true); return; }
+      const ou = val(f, 'ownerUsername').toLowerCase(); const op = val(f, 'ownerPassword');
+      if (ou && !USER_RE.test(ou)) { toast('Check the owner’s username.', true); return; }
+      if (ou && op.length < 8) { toast('Passwords need at least 8 characters.', true); return; }
+      const ws = workers.map((w) => ({ name: w.name.trim(), username: w.username.trim().toLowerCase(), password: w.password }));
+      const bad = ws.find((w) => !w.name || !USER_RE.test(w.username) || w.password.length < 8);
+      if (bad) { toast('Each worker needs a name, a username and a password of 8+ characters.', true); return; }
       const body = {
         name: val(f, 'name'), category: val(f, 'category'), ownerPhone: val(f, 'ownerPhone'), earnPercent: Math.round(Number(val(f, 'earnPercent')) || 0),
-        managerAccess: f.elements.managerAccess.checked,
+        managerAccess: f.elements.managerAccess.checked, featured: f.elements.featured.checked, storeEnabled: f.elements.storeEnabled.checked,
         ...(val(f, 'ownerName') ? { ownerName: val(f, 'ownerName') } : {}), ...(val(f, 'city') ? { city: val(f, 'city') } : {}),
         ...(val(f, 'address') ? { address: val(f, 'address') } : {}), ...(val(f, 'whatsapp') ? { whatsapp: val(f, 'whatsapp') } : {}),
         ...(val(f, 'instagram') ? { instagram: val(f, 'instagram').replace(/^@/, '') } : {}), ...(val(f, 'description') ? { description: val(f, 'description') } : {}),
         ...(ll ? { lat: ll[0], lng: ll[1] } : {}),
+        ...(val(f, 'logoMediaId') ? { logoMediaId: val(f, 'logoMediaId') } : {}), ...(val(f, 'coverMediaId') ? { coverMediaId: val(f, 'coverMediaId') } : {}),
+        ...(ou ? { ownerUsername: ou, ownerPassword: op } : {}),
+        workers: ws,
       };
-      if (!body.name || !body.ownerPhone) { toast('Add the shop name and the owner’s phone.', true); return false; }
-      const r = await api('POST', '/v1/admin/shops', body);
-      toast('Shop added. Add its photos, offers and products next.');
-      S.shops = [];
-      location.hash = 'shop/' + r.id + '/profile';
-    }, { save: 'Add shop', size: 'lg' });
+      const btn = $('button[type=submit]', f); btn.disabled = true;
+      try {
+        const r = await api('POST', '/v1/admin/shops', body);
+        S.shops = [];
+        const go = () => { location.hash = 'shop/' + r.id + (body.storeEnabled ? '/store' : '/overview'); };
+        const creds = [...(ou ? [{ role: 'Owner', name: val(f, 'ownerName'), username: ou, password: op }] : []), ...ws.map((w) => ({ role: 'Worker', name: w.name, username: w.username, password: w.password }))];
+        toast('Shop created');
+        if (creds.length) showCredentials(body.name, creds, go); else go();
+      } catch (err) { fail(err); } finally { btn.disabled = false; }
+    };
+    preview();
   }
 
   // =====================================================================
@@ -646,7 +788,7 @@
   // =====================================================================
   const WS_TABS = [
     ['overview', 'Overview', 'dashboard'], ['profile', 'Profile', 'store'], ['offers', 'Offers', 'tag'], ['rewards', 'Rewards', 'gift'],
-    ['store', 'Online store', 'bag'], ['orders', 'Orders', 'box'], ['bookings', 'Bookings', 'calendar'], ['team', 'Cashiers', 'users'], ['bills', 'Bills', 'receipt'],
+    ['store', 'Online store', 'bag'], ['orders', 'Orders', 'box'], ['bookings', 'Bookings', 'calendar'], ['team', 'Team & logins', 'users'], ['bills', 'Bills', 'receipt'],
   ];
   const ST_CLS = { ACTIVE: 'ok', PAUSED: '', ARCHIVED: '', REQUESTED: 'y', ACCEPTED: 'pur', DECLINED: 'bad', CANCELLED: 'bad', REDEEMED: 'ok', EXPIRED: '', NEW: 'y', CONFIRMED: 'pur', READY: 'ok', COMPLETED: 'ok' };
   const pill = (st) => `<span class="pill ${ST_CLS[st] || ''}">${esc(st.charAt(0) + st.slice(1).toLowerCase())}</span>`;
@@ -1033,24 +1175,72 @@
 
   // ---------- Cashiers ----------
   async function wsTeam(ws, shop) {
-    const t = await api('GET', `${base(shop)}/staff`);
+    const [L, t] = await Promise.all([api('GET', `/v1/admin/shops/${shop.id}/logins`), api('GET', `${base(shop)}/staff`)]);
+    const o = L.owner;
     ws.innerHTML = `
-      <div class="card flush"><div class="card-h"><h3>Cashiers</h3><span class="sp"></span><button class="btn sec sm" id="pair">${ic('key', 'sm')} Pair a counter device</button><button class="btn sm" id="add">${ic('plus', 'sm')} Add cashier</button></div>
-      <div class="tw nomax"><table class="tbl"><thead><tr><th>Cashier</th><th>Branch</th><th>Can redeem</th><th class="r">Max bill</th><th>Active</th><th></th></tr></thead><tbody>
-      ${t.staff.map((x) => `<tr data-id="${esc(x.id)}"><td><div class="who"><span class="avatar lt">${esc(initials(x.name))}</span><div class="t"><b>${esc(x.name)}</b></div></div></td><td>${esc(x.branchName)}</td><td>${x.limits?.canRedeem ? '<span class="pill ok">Yes</span>' : '<span class="pill">No</span>'}</td><td class="r num">${usd(x.limits?.maxBillMinor)}</td><td>${toggle('a', x.active, 'data-active aria-label="Active"')}</td><td><div class="acts"><button class="btn ghost sm" data-pin>${ic('key', 'sm')} New PIN</button></div></td></tr>`).join('') || `<tr><td colspan="6">${empty('users', 'No cashiers yet', 'The owner can also collect and redeem from their own phone.')}</td></tr>`}
+      <div class="card"><div class="card-h"><h3>Owner login</h3><span class="sp"></span>${o ? `<button class="btn sec sm" id="ownerEdit">${ic('key', 'sm')} Change username or password</button>` : `<button class="btn sm" id="ownerEdit">${ic('plus', 'sm')} Create owner login</button>`}</div>
+        <div class="card-b">${o ? `<div class="loginrow"><span class="avatar">${esc(initials(o.name || shop.name))}</span><div class="t"><b>${esc(o.name || 'Owner')}</b><small>Username <code>${esc(o.username)}</code> · ${o.lastLoginAt ? 'last signed in ' + esc(when(o.lastLoginAt)) : 'not signed in yet'}</small></div>${o.active ? '<span class="pill ok">Active</span>' : '<span class="pill">Off</span>'}</div>` : `<p class="muted" style="margin:0">The owner has no username yet. Create one so they can sign in to Mukafaah Business.</p>`}</div></div>
+      <div class="card flush"><div class="card-h"><h3>Workers</h3><span class="sp"></span><button class="btn sm" id="addW">${ic('plus', 'sm')} Add worker</button></div>
+      <div class="tw nomax"><table class="tbl"><thead><tr><th>Worker</th><th>Username</th><th>Branch</th><th>Can redeem</th><th>Active</th><th></th></tr></thead><tbody>
+      ${L.workers.map((w) => `<tr data-id="${esc(w.staffId)}"><td><div class="who"><span class="avatar lt">${esc(initials(w.name))}</span><div class="t"><b>${esc(w.name)}</b><small class="muted">${w.lastLoginAt ? 'Last signed in ' + esc(when(w.lastLoginAt)) : w.username ? 'Not signed in yet' : 'Counter PIN only'}</small></div></div></td>
+        <td>${w.username ? `<code>${esc(w.username)}</code>` : '<span class="muted">—</span>'}</td><td>${esc(w.branchName)}</td>
+        <td>${toggle('r', w.canRedeem, 'data-redeem aria-label="Can redeem"')}</td><td>${toggle('a', w.active, 'data-active aria-label="Active"')}</td>
+        <td><div class="acts"><button class="btn ghost sm" data-login>${ic('key', 'sm')} ${w.username ? 'New password' : 'Create login'}</button></div></td></tr>`).join('') || `<tr><td colspan="6">${empty('users', 'No workers yet', 'Add workers so they can give points from their own phones.')}</td></tr>`}
       </tbody></table></div></div>
-      <div class="card flush"><div class="card-h"><h3>Counter devices</h3></div>${t.devices.length ? `<div class="tw nomax"><table class="tbl"><tbody>${t.devices.map((d) => `<tr data-id="${esc(d.id)}"><td><b>${esc(d.label)}</b><div class="muted">${esc(d.branch_name || d.branchName || '')}</div></td><td>${d.status === 'ACTIVE' ? '<span class="pill ok">Active</span>' : '<span class="pill">Revoked</span>'}</td><td class="muted">${d.last_seen_at || d.lastSeenAt ? 'Last seen ' + esc(day(d.last_seen_at || d.lastSeenAt)) : ''}</td><td><div class="acts">${d.status === 'ACTIVE' ? `<button class="btn danger sm" data-revoke>Revoke</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>` : `<div style="padding:0 20px 20px" class="muted">No devices yet.</div>`}</div>`;
-    const branchSel = () => `<label class="f"><span>Branch</span><select class="in" name="branchId">${t.branches.map((b) => opt(b.id, b.name, t.branches[0]?.id)).join('')}</select></label>`;
-    $('#add', ws).onclick = () => modal('Add cashier', `<label class="f"><span>Name</span><input class="in" name="name" maxlength="60" required></label>${branchSel()}<label class="f"><span>PIN</span><input class="in" name="pin" inputmode="numeric" maxlength="6" required><em>4 to 6 digits. The cashier uses it on the counter device.</em></label>`,
-      async (f) => { await api('POST', `${base(shop)}/staff`, { name: val(f, 'name'), branchId: val(f, 'branchId'), pin: val(f, 'pin') }); toast('Cashier added'); reloadTab(); }, { save: 'Add', size: 'sm' });
-    $('#pair', ws).onclick = () => modal('Pair a counter device', `${branchSel()}<p class="muted" style="margin:0">Enter the code in the Business app on the counter device (Counter device → Pair). It works for 10 minutes.</p>`,
+      <div class="card flush"><div class="card-h"><h3>Signed-in phones</h3><span class="sp"></span><button class="btn ghost sm" id="pair">${ic('key', 'sm')} Pair a shared counter</button></div>${t.devices.length ? `<div class="tw nomax"><table class="tbl"><tbody>${t.devices.map((d) => `<tr data-dev="${esc(d.id)}"><td><b>${esc(d.label)}</b><div class="muted">${esc(d.branch_name || d.branchName || '')}</div></td><td>${d.status === 'ACTIVE' ? '<span class="pill ok">Active</span>' : '<span class="pill">Signed out</span>'}</td><td class="muted">${d.last_seen_at || d.lastSeenAt ? 'Last seen ' + esc(day(d.last_seen_at || d.lastSeenAt)) : ''}</td><td><div class="acts">${d.status === 'ACTIVE' ? `<button class="btn danger sm" data-revoke>Sign out</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>` : `<div style="padding:0 20px 20px" class="muted">No phones yet. They show here after a worker signs in.</div>`}</div>`;
+    const branchSel = (cur) => `<label class="f"><span>Branch</span><select class="in" name="branchId">${L.branches.map((b) => opt(b.id, b.name, cur || L.branches[0]?.id)).join('')}</select></label>`;
+    $('#ownerEdit', ws).onclick = () => {
+      const f = modal(o ? 'Owner login' : 'Create owner login', `
+        <label class="f"><span>Username</span><input class="in mono" name="username" value="${esc(o?.username || slug(shop.name))}" maxlength="32" spellcheck="false"><small class="unote" id="un"></small></label>
+        ${o ? `<div class="optcard"><div class="swrow">${toggle('newpw', false)}<div class="t"><b>Set a new password</b><small>The old one stops working.</small></div></div></div><div id="pwbox" hidden>${pwField('password', genPassword())}</div>` : pwField('password', genPassword())}`,
+      async (form) => {
+        const username = val(form, 'username').toLowerCase(); const setPw = !o || form.elements.newpw.checked; const password = val(form, 'password');
+        if (!USER_RE.test(username)) { toast('Check the username.', true); return false; }
+        if (setPw && password.length < 8) { toast('At least 8 characters.', true); return false; }
+        await api('PUT', `/v1/admin/shops/${shop.id}/logins/owner`, { username, ...(setPw ? { password } : {}) });
+        if (setPw) showCredentials(shop.name, [{ role: 'Owner', name: L.ownerName, username, password }], reloadTab); else { toast('Saved'); reloadTab(); }
+      }, { size: 'sm' });
+      wirePw(f); if (f.elements.username !== undefined) wireUsername(f.elements.username, $('#un', f));
+      if (o) f.elements.newpw.onchange = () => { $('#pwbox', f).hidden = !f.elements.newpw.checked; };
+    };
+    $('#addW', ws).onclick = () => {
+      const f = modal('Add worker', `<label class="f"><span>Name</span><input class="in" name="name" maxlength="60" required placeholder="Rami"></label>
+        <label class="f"><span>Username</span><input class="in mono" name="username" maxlength="32" spellcheck="false"><small class="unote" id="un"></small></label>
+        ${pwField('password', genPassword())}${branchSel()}
+        <div class="optcard"><div class="swrow">${toggle('canRedeem', true)}<div class="t"><b>Can redeem points</b><small>Off: this worker can only give points.</small></div></div></div>`,
+      async (form) => {
+        const body = { name: val(form, 'name'), username: val(form, 'username').toLowerCase(), password: val(form, 'password'), branchId: val(form, 'branchId'), canRedeem: form.elements.canRedeem.checked };
+        if (!body.name || !USER_RE.test(body.username) || body.password.length < 8) { toast('Add a name, a username and a password of 8+ characters.', true); return false; }
+        await api('POST', `/v1/admin/shops/${shop.id}/logins/workers`, body);
+        showCredentials(shop.name, [{ role: 'Worker', name: body.name, username: body.username, password: body.password }], reloadTab);
+      }, { size: 'sm' });
+      wirePw(f); wireUsername(f.elements.username, $('#un', f));
+      let touched = false; f.elements.username.addEventListener('input', () => (touched = true));
+      f.elements.name.addEventListener('input', () => { if (!touched) { f.elements.username.value = slug(shop.name.split(' ')[0], val(f, 'name').split(' ')[0]); f.elements.username.dispatchEvent(new Event('input')); touched = false; } });
+    };
+    $('#pair', ws).onclick = () => modal('Pair a shared counter', `${branchSel()}<p class="muted" style="margin:0">For a tablet at the counter shared by several workers. Enter the code in Mukafaah Business (Shared counter → Pair). It works for 10 minutes.</p>`,
       async (f) => { const r = await api('POST', `${base(shop)}/pairing-codes`, { branchId: val(f, 'branchId') }); modal('Pairing code', `<div class="code-big">${esc(r.code)}</div><p class="muted" style="text-align:center">Branch ${esc(r.branchName || '')} · valid 10 minutes</p>`, () => {}, { save: 'Done', size: 'sm' }); }, { save: 'Create code', size: 'sm' });
     ws.addEventListener('click', async (e) => {
       const tr = e.target.closest('tr'); if (!tr) return;
-      if (e.target.closest('[data-pin]')) modal('New PIN', '<label class="f"><span>New PIN</span><input class="in" name="pin" inputmode="numeric" maxlength="6"><em>4 to 6 digits.</em></label>', async (f) => { await api('PATCH', `${base(shop)}/staff/${tr.dataset.id}`, { pin: val(f, 'pin') }); toast('PIN changed'); }, { size: 'sm' });
-      if (e.target.closest('[data-revoke]') && (await confirmBox('Revoke device?', 'It will be signed out and can’t give points any more.', 'Revoke'))) { try { await api('POST', `${base(shop)}/devices/${tr.dataset.id}/revoke`); reloadTab(); } catch (err) { fail(err); } }
+      const w = L.workers.find((x) => x.staffId === tr.dataset.id);
+      if (w && e.target.closest('[data-login]')) {
+        const f = modal(w.username ? `New password for ${w.name}` : `Login for ${w.name}`, `${w.username ? '' : `<label class="f"><span>Username</span><input class="in mono" name="username" value="${esc(slug(shop.name.split(' ')[0], w.name.split(' ')[0]))}" maxlength="32"><small class="unote" id="un"></small></label>`}${pwField('password', genPassword())}`,
+          async (form) => {
+            const password = val(form, 'password'); const username = w.username || val(form, 'username').toLowerCase();
+            if (password.length < 8 || !USER_RE.test(username)) { toast('Check the username and password.', true); return false; }
+            await api('PATCH', `/v1/admin/shops/${shop.id}/logins/workers/${w.staffId}`, { password, ...(w.username ? {} : { username }) });
+            showCredentials(shop.name, [{ role: 'Worker', name: w.name, username, password }], reloadTab);
+          }, { size: 'sm' });
+        wirePw(f); if (!w.username) wireUsername(f.elements.username, $('#un', f));
+      }
+      if (e.target.closest('[data-revoke]') && (await confirmBox('Sign out this phone?', 'It stops working until someone signs in again.', 'Sign out'))) { try { await api('POST', `${base(shop)}/devices/${tr.dataset.dev}/revoke`); reloadTab(); } catch (err) { fail(err); } }
     });
-    ws.addEventListener('change', async (e) => { if (!e.target.matches('[data-active]')) return; try { await api('PATCH', `${base(shop)}/staff/${e.target.closest('tr').dataset.id}`, { active: e.target.checked }); toast('Saved'); } catch (err) { fail(err); e.target.checked = !e.target.checked; } });
+    ws.addEventListener('change', async (e) => {
+      const tr = e.target.closest('tr'); if (!tr || !tr.dataset.id) return;
+      const patch = e.target.matches('[data-active]') ? { active: e.target.checked } : e.target.matches('[data-redeem]') ? { canRedeem: e.target.checked } : null;
+      if (!patch) return;
+      try { await api('PATCH', `/v1/admin/shops/${shop.id}/logins/workers/${tr.dataset.id}`, patch); toast(patch.active === false ? 'Worker switched off and signed out' : 'Saved'); } catch (err) { fail(err); e.target.checked = !e.target.checked; }
+    });
   }
 
   async function wsBills(ws, shop) {
@@ -1875,7 +2065,7 @@
   const ROUTES = {
     overview: [pageOverview, isContent], shops: [pageShops, isContent], reports: [pageReports, () => true], customers: [pageCustomers, isContent],
     home: [pageHome, isContent], banners: [pageBanners, isContent], categories: [pageCategories, isContent], offers: [pageOffers, isContent],
-    tiers: [pageTiers, isFull], mukafaah: [pageMukafaah, isFull], accounts: [pageAccounts, isFull], settings: [pageSettings, isFull], myshops: [pageMyShops, isShop],
+    tiers: [pageTiers, isFull], mukafaah: [pageMukafaah, isFull], accounts: [pageAccounts, isFull], settings: [pageSettings, isFull], myshops: [pageMyShops, isShop], newshop: [pageNewShop, isFull],
   };
   function homeHash() {
     if (!isShop()) return 'overview';

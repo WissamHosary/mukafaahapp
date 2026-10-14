@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mk_core/mk_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,7 +36,9 @@ final localeProvider = NotifierProvider<LocaleNotifier, String>(LocaleNotifier.n
 final stringsProvider = Provider<S>((ref) => S(ref.watch(localeProvider)));
 
 // ---------- Session: which mode this device runs in, and who is signed in ----------
-enum AppMode { none, owner, counter }
+/// owner: the shop owner's phone. worker: a worker signed in with their own
+/// username. counter: a shared counter tablet paired with a code.
+enum AppMode { none, owner, worker, counter }
 
 enum OwnerStatus { unknown, signedOut, needsBusiness, ready }
 
@@ -45,9 +49,13 @@ class BizSession {
     this.owner = OwnerStatus.unknown,
     this.device,
     this.staff,
+    this.workerShop,
+    this.workerBranch,
   });
 
   final bool loaded;
+  final String? workerShop;
+  final String? workerBranch;
   final AppMode mode;
   final OwnerStatus owner;
   final DeviceCreds? device;
@@ -63,6 +71,8 @@ class BizSession {
     bool clearDevice = false,
     StaffSession? staff,
     bool clearStaff = false,
+    String? workerShop,
+    String? workerBranch,
   }) =>
       BizSession(
         loaded: loaded ?? this.loaded,
@@ -70,12 +80,15 @@ class BizSession {
         owner: owner ?? this.owner,
         device: clearDevice ? null : (device ?? this.device),
         staff: clearStaff ? null : (staff ?? this.staff),
+        workerShop: workerShop ?? this.workerShop,
+        workerBranch: workerBranch ?? this.workerBranch,
       );
 }
 
 class SessionNotifier extends Notifier<BizSession> {
   static const _modeKey = 'mk.biz.mode';
   static const _devKey = 'mk.biz.device';
+  static const _workerKey = 'mk.biz.worker';
 
   SecureStore get _store => ref.read(storeProvider);
 
@@ -88,6 +101,7 @@ class SessionNotifier extends Notifier<BizSession> {
   Future<void> _restore() async {
     final mode = switch (await _store.read(_modeKey)) {
       'owner' => AppMode.owner,
+      'worker' => AppMode.worker,
       'counter' => AppMode.counter,
       _ => AppMode.none,
     };
@@ -97,12 +111,44 @@ class SessionNotifier extends Notifier<BizSession> {
       final p = raw.split('\u0001');
       if (p.length == 4) device = DeviceCreds(id: p[0], secret: p[1], businessName: p[2], branchName: p[3]);
     }
-    state = state.copy(loaded: true, mode: mode, device: device);
+    StaffSession? worker;
+    if (mode == AppMode.worker) {
+      // A worker stays signed in until their 12-hour session ends.
+      final w = (await _store.read(_workerKey))?.split('\u0001');
+      if (w != null && w.length == 5 && (DateTime.tryParse(w[4])?.isAfter(DateTime.now()) ?? false)) {
+        worker = StaffSession(token: w[0], id: w[1], name: w[2], canRedeem: w[3] == '1');
+        ref.read(apiClientProvider).staffToken = worker.token;
+      }
+    }
+    state = state.copy(loaded: true, mode: mode, device: device, staff: worker);
     if (mode == AppMode.owner) await refreshOwner();
   }
 
+  /// Signs in with the username and password Mukafaah gave the shop. Owners go
+  /// to the owner app, workers straight to the counter.
+  Future<void> signIn(String username, String password) async {
+    final r = await ref.read(apiProvider).businessLogin(username, password);
+    if (r.staff == null) {
+      ref.read(apiClientProvider).staffToken = null;
+      await _store.write(_workerKey, null);
+      await chooseMode(AppMode.owner);
+      return;
+    }
+    final st = r.staff!;
+    final until = DateTime.now().add(Duration(seconds: r.expiresInSec - 60));
+    await _store.write(_workerKey, [st.token, st.id, st.name, st.canRedeem ? '1' : '0', until.toIso8601String()].join('\u0001'));
+    await _store.write(_modeKey, 'worker');
+    ref.read(apiClientProvider).staffToken = st.token;
+    state = state.copy(mode: AppMode.worker, staff: st, workerShop: r.businessName, workerBranch: r.branchName);
+  }
+
   Future<void> chooseMode(AppMode mode) async {
-    await _store.write(_modeKey, switch (mode) { AppMode.owner => 'owner', AppMode.counter => 'counter', AppMode.none => null });
+    await _store.write(_modeKey, switch (mode) {
+      AppMode.owner => 'owner',
+      AppMode.worker => 'worker',
+      AppMode.counter => 'counter',
+      AppMode.none => null,
+    });
     state = state.copy(mode: mode, owner: mode == AppMode.owner ? OwnerStatus.unknown : state.owner);
     if (mode == AppMode.owner) await refreshOwner();
   }
@@ -156,6 +202,7 @@ class SessionNotifier extends Notifier<BizSession> {
 
   void lockCounter() {
     ref.read(apiClientProvider).staffToken = null;
+    if (state.mode == AppMode.worker) unawaited(_store.write(_workerKey, null));
     state = state.copy(clearStaff: true);
   }
 

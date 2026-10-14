@@ -43,13 +43,13 @@ final routerProvider = Provider<GoRouter>((ref) {
     if (!s.loaded) return path == '/splash' ? null : '/splash';
     switch (s.mode) {
       case AppMode.none:
-        return path == '/mode' ? null : '/mode';
+        return path == '/signin' ? null : '/signin';
       case AppMode.owner:
         switch (s.owner) {
           case OwnerStatus.unknown:
             return path == '/splash' ? null : '/splash';
           case OwnerStatus.signedOut:
-            return path.startsWith('/owner/login') ? null : '/owner/login';
+            return path == '/signin' || path.startsWith('/owner/login') ? null : '/signin';
           case OwnerStatus.needsBusiness:
             return path == '/owner/onboard' ? null : '/owner/onboard';
           case OwnerStatus.ready:
@@ -57,6 +57,9 @@ final routerProvider = Provider<GoRouter>((ref) {
                 ? null
                 : '/owner/collect';
         }
+      case AppMode.worker:
+        if (s.staff == null) return path == '/signin' ? null : '/signin';
+        return path == '/counter' || path == '/counter/shift' ? null : '/counter';
       case AppMode.counter:
         if (s.device == null) return path == '/counter/pair' ? null : '/counter/pair';
         if (s.staff == null) return path == '/counter/login' ? null : '/counter/login';
@@ -73,6 +76,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/splash', pageBuilder: (c, s) => _fade(s, const SplashScreen())),
       GoRoute(path: '/mode', pageBuilder: (c, s) => _fade(s, const ModeScreen())),
+      GoRoute(path: '/signin', pageBuilder: (c, s) => _fade(s, const SignInScreen())),
       GoRoute(path: '/owner/login', pageBuilder: (c, s) => _fade(s, const OwnerLoginScreen())),
       GoRoute(path: '/owner/onboard', pageBuilder: (c, s) => _fade(s, const OnboardScreen())),
       ShellRoute(

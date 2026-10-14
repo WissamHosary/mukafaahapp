@@ -4,8 +4,9 @@ import { audit } from '../platform/audit.js';
 import { AdminScope, Auth, ClientIp, RequireAdmin, assertShopScope, forbiddenScope, type AdminAuth, type OwnerAuth } from '../platform/auth.js';
 import { CryptoService } from '../platform/crypto.js';
 import { Db } from '../platform/db.js';
-import { Errors } from '../platform/errors.js';
+import { AppError, Errors } from '../platform/errors.js';
 import { parse, zUuid } from '../platform/validation.js';
+import { createOwnerLogin, createWorker, zPassword, zUsername, zWorker } from './logins.js';
 import { LedgerService } from './ledger.js';
 import { MerchantController } from './merchant.js';
 import { OwnerController, createShop } from './owner.js';
@@ -34,6 +35,16 @@ const zNewShop = z.strictObject({
   lng: z.number().min(-180).max(180).optional(),
   /** Also give the owner a Manager account limited to this shop. */
   managerAccess: z.boolean().optional(),
+  // v0.8: everything set up in one go from Mukafaah Manager.
+  logoMediaId: zUuid.nullable().optional(),
+  coverMediaId: zUuid.nullable().optional(),
+  storeEnabled: z.boolean().optional(),
+  featured: z.boolean().optional(),
+  /** The owner's username and password for Mukafaah Business. */
+  ownerUsername: zUsername.optional(),
+  ownerPassword: zPassword.optional(),
+  /** Workers for the counter, each with their own username and password. */
+  workers: z.array(zWorker.omit({ branchId: true })).max(50).default([]),
 });
 const zMonth = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(),
@@ -98,6 +109,21 @@ export class AdminShopsController {
         `UPDATE businesses SET description = $2, whatsapp = $3, instagram = $4, address = $5, city = $6, lat = $7, lng = $8 WHERE id = $1`,
         [bid, b.description ?? null, b.whatsapp ?? null, b.instagram ?? null, b.address ?? null, b.city ?? null, b.lat ?? null, b.lng ?? null],
       );
+      await c.query(
+        `UPDATE businesses SET logo_media_id = COALESCE($2, logo_media_id), cover_media_id = COALESCE($3, cover_media_id),
+                store_enabled = COALESCE($4, store_enabled), featured = COALESCE($5, featured) WHERE id = $1`,
+        [bid, b.logoMediaId ?? null, b.coverMediaId ?? null, b.storeEnabled ?? null, b.featured ?? null],
+      );
+      if (b.ownerUsername) {
+        if (!b.ownerPassword) throw Errors.validation({ ownerPassword: ['REQUIRED'] });
+        await createOwnerLogin(c, { businessId: bid, userId: user.id, username: b.ownerUsername, password: b.ownerPassword, by: a.userId });
+      }
+      const names = new Set<string>([b.ownerUsername ?? '']);
+      for (const w of b.workers) {
+        if (names.has(w.username)) throw new AppError(409, 'USERNAME_TAKEN', 'This username is already used', { username: w.username });
+        names.add(w.username);
+        await createWorker(c, { businessId: bid, name: w.name, username: w.username, password: w.password, canRedeem: w.canRedeem, by: a.userId });
+      }
       if (b.managerAccess) {
         await c.query(`INSERT INTO admins(user_id, role) VALUES ($1, 'SHOP') ON CONFLICT (user_id) DO NOTHING`, [user.id]);
         const role = (await c.query(`SELECT role FROM admins WHERE user_id = $1`, [user.id])).rows[0]?.role;
