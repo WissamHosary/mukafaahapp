@@ -17,7 +17,7 @@
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* private mode */ } },
   };
-  const VERSION = '0.7.0';
+  const VERSION = '0.8.0';
 
   // ---------- Icons (inline SVG, 24px grid) ----------
   const IC = {
