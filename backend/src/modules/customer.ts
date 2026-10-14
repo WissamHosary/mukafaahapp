@@ -1,0 +1,220 @@
+import { Body, Controller, Get, HttpCode, Module, Patch, Post, Query } from '@nestjs/common';
+import { z } from 'zod';
+import { audit } from '../platform/audit.js';
+import { Auth, IdemKey, RequireUser, type UserAuth } from '../platform/auth.js';
+import { CryptoService } from '../platform/crypto.js';
+import { Db } from '../platform/db.js';
+import { parse } from '../platform/validation.js';
+import { LedgerService } from './ledger.js';
+import { mukafaahBalance } from './mukafaah.js';
+import { MEMBER_QR_PREFIX, memberCode } from './shared.js';
+
+/** Older rotating QR tokens (still accepted at the counter). */
+export const QR_PREFIX = 'MKF1:';
+
+const zProfile = z.strictObject({
+  name: z.string().trim().min(1).max(60).optional(),
+  locale: z.enum(['ar', 'en']).optional(),
+});
+const zPage = z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) });
+
+@Controller('v1/customer')
+@RequireUser()
+export class CustomerController {
+  constructor(
+    private readonly db: Db,
+    private readonly crypto: CryptoService,
+    private readonly ledger: LedgerService,
+  ) {}
+
+  @Get('me')
+  async me(@Auth() auth: UserAuth) {
+    const u = await this.db.one(`SELECT id, name, locale, phone_last4, created_at FROM users WHERE id = $1`, [auth.userId]);
+    const owns = await this.db.one(`SELECT id, name FROM businesses WHERE owner_user_id = $1`, [auth.userId]);
+    return { id: u.id, name: u.name, locale: u.locale, phoneLast4: u.phone_last4, business: owns ?? null };
+  }
+
+  @Patch('me')
+  async update(@Auth() auth: UserAuth, @Body() body: unknown) {
+    const b = parse(zProfile, body);
+    await this.db.query(
+      `UPDATE users SET name = COALESCE($2, name), locale = COALESCE($3, locale), updated_at = now() WHERE id = $1`,
+      [auth.userId, b.name ?? null, b.locale ?? null],
+    );
+    return this.me(auth);
+  }
+
+  /** Balances per program, with where each balance can be used. */
+  @Get('wallet')
+  async wallet(@Auth() auth: UserAuth) {
+    const r = await this.db.query(
+      `SELECT p.id AS program_id, p.type, p.name AS program_name, p.redeem_points_per_unit,
+              ab.balance,
+              (SELECT json_agg(json_build_object('id', b.id, 'name', b.name, 'category', b.category) ORDER BY b.name)
+                 FROM program_members pm JOIN businesses b ON b.id = pm.business_id
+                WHERE pm.program_id = p.id AND pm.active AND pm.can_redeem) AS usable_at
+         FROM ledger_accounts a
+         JOIN account_balances ab ON ab.account_id = a.id
+         JOIN programs p ON p.id = a.program_id AND p.type <> 'PLATFORM'
+        WHERE a.owner_type = 'CUSTOMER' AND a.owner_id = $1
+        ORDER BY ab.balance DESC`,
+      [auth.userId],
+    );
+    const total = r.rows.reduce((s, x) => s + Number(x.balance), 0);
+    return {
+      // Shop points only; Mukafaah Points are separate.
+      totalPoints: total,
+      mukafaahPoints: await mukafaahBalance(this.db, auth.userId),
+      programs: r.rows.map((x) => ({
+        programId: x.program_id,
+        type: x.type,
+        name: x.program_name,
+        balance: Number(x.balance),
+        pointsPerUnitDiscount: x.redeem_points_per_unit,
+        usableAt: x.usable_at ?? [],
+      })),
+    };
+  }
+
+  @Get('wallet/transactions')
+  async transactions(@Auth() auth: UserAuth, @Query() q: unknown) {
+    const { limit } = parse(zPage, q);
+    const r = await this.db.query(
+      `SELECT t.id, t.type, t.created_at, e.amount, p.name AS program_name, p.type AS program_type,
+              b.name AS business_name, br.name AS branch_name
+         FROM ledger_transactions t
+         JOIN ledger_entries e ON e.transaction_id = t.id
+         JOIN ledger_accounts a ON a.id = e.account_id AND a.owner_type = 'CUSTOMER' AND a.owner_id = $1
+         JOIN programs p ON p.id = t.program_id
+         LEFT JOIN businesses b ON b.id = t.business_id
+         LEFT JOIN branches br ON br.id = t.branch_id
+        ORDER BY t.created_at DESC
+        LIMIT $2`,
+      [auth.userId, limit],
+    );
+    return r.rows.map((x) => ({
+      id: x.id,
+      type: x.type,
+      points: Number(x.amount),
+      programName: x.program_name,
+      programType: x.program_type,
+      businessName: x.business_name,
+      branchName: x.branch_name,
+      createdAt: x.created_at,
+    }));
+  }
+
+  /** Pre-Points waiting for this verified phone number. */
+  @Get('prepoints')
+  async prepoints(@Auth() auth: UserAuth) {
+    const r = await this.db.query(
+      `SELECT p.id AS program_id, p.type, p.name AS program_name, ab.balance,
+              (SELECT json_agg(DISTINCT b.name)
+                 FROM ledger_transactions t JOIN businesses b ON b.id = t.business_id
+                WHERE t.pending_holder_id = h.id AND t.program_id = p.id AND t.type = 'PREPOINT_EARN') AS from_businesses
+         FROM users u
+         JOIN pending_holders h ON h.phone_hash = u.phone_hash
+         JOIN ledger_accounts a ON a.owner_type = 'PENDING' AND a.owner_id = h.id
+         JOIN account_balances ab ON ab.account_id = a.id AND ab.balance > 0
+         JOIN programs p ON p.id = a.program_id
+        WHERE u.id = $1`,
+      [auth.userId],
+    );
+    const total = r.rows.reduce((s, x) => s + Number(x.balance), 0);
+    return {
+      totalPoints: total,
+      items: r.rows.map((x) => ({
+        programId: x.program_id,
+        type: x.type,
+        programName: x.program_name,
+        points: Number(x.balance),
+        fromBusinesses: x.from_businesses ?? [],
+      })),
+    };
+  }
+
+  /** Moves every pending balance for this phone into the customer's wallet. No merchant approval. */
+  @Post('prepoints/collect')
+  @HttpCode(200)
+  async collect(@Auth() auth: UserAuth, @IdemKey() key: string) {
+    return this.db.tx(async (c) => {
+      const pend = await c.query(
+        `SELECT a.id AS account_id, a.program_id, h.id AS holder_id
+           FROM users u
+           JOIN pending_holders h ON h.phone_hash = u.phone_hash
+           JOIN ledger_accounts a ON a.owner_type = 'PENDING' AND a.owner_id = h.id
+          WHERE u.id = $1
+          ORDER BY a.id`,
+        [auth.userId],
+      );
+      let collected = 0;
+      for (const row of pend.rows) {
+        const idem = `collect:${auth.userId}:${key}:${row.account_id}`;
+        if (await this.ledger.existing(c, idem)) continue;
+        // lock and read the pending balance
+        const bal = await c.query(`SELECT balance FROM account_balances WHERE account_id = $1 FOR UPDATE`, [
+          row.account_id,
+        ]);
+        const points = Number(bal.rows[0]?.balance ?? 0);
+        if (points <= 0) continue;
+        const wallet = await this.ledger.account(c, row.program_id, 'CUSTOMER', auth.userId);
+        await this.ledger.post(c, {
+          type: 'PREPOINT_CLAIM',
+          programId: row.program_id,
+          idempotencyKey: idem,
+          userId: auth.userId,
+          pendingHolderId: row.holder_id,
+          entries: [
+            { accountId: row.account_id, amount: -points },
+            { accountId: wallet, amount: points },
+          ],
+        });
+        collected += points;
+      }
+      if (collected > 0) {
+        await audit(c, { actorType: 'USER', actorId: auth.userId, action: 'prepoints.collect', data: { points: collected } });
+      }
+      return { collectedPoints: collected };
+    });
+  }
+
+  /**
+   * The member's fixed QR: MKF2:<memberCode>. It never changes, so the app can
+   * keep it offline. Earning needs nothing more; spending always needs the
+   * customer's approval in the app.
+   */
+  @Get('qr')
+  async qr(@Auth() auth: UserAuth) {
+    const code = await memberCode(this.db, auth.userId);
+    return { payload: MEMBER_QR_PREFIX + code, memberCode: code };
+  }
+
+  /** Kept for older app builds: returns the same fixed QR. */
+  @Post('qr/token')
+  @HttpCode(200)
+  async qrToken(@Auth() auth: UserAuth) {
+    const { payload } = await this.qr(auth);
+    return { token: payload, payload, ttlSeconds: 0, expiresAt: null };
+  }
+
+  /** Businesses on Mukafaah, with the programs they belong to. */
+  @Get('businesses')
+  async businesses() {
+    const r = await this.db.query(
+      `SELECT b.id, b.name, b.category,
+              json_agg(json_build_object('programId', p.id, 'type', p.type, 'name', p.name,
+                                         'earnPointsPerUnit', p.earn_points_per_unit) ORDER BY p.type) AS programs
+         FROM businesses b
+         JOIN program_members pm ON pm.business_id = b.id AND pm.active
+         JOIN programs p ON p.id = pm.program_id AND p.status = 'ACTIVE'
+        WHERE b.status = 'ACTIVE'
+        GROUP BY b.id
+        ORDER BY b.created_at DESC
+        LIMIT 100`,
+    );
+    return r.rows;
+  }
+}
+
+@Module({ controllers: [CustomerController] })
+export class CustomerModule {}

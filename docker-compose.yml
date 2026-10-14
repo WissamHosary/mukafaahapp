@@ -1,0 +1,48 @@
+# Local development stack: PostgreSQL 18 + Mukafaah API.
+# Start with tools\start-backend.bat (or: docker compose up -d --build)
+name: mukafaah
+
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: mukafaah
+      POSTGRES_PASSWORD: mukafaah_dev_only
+      POSTGRES_DB: mukafaah
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mukafaah -d mukafaah"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      DATABASE_URL: postgres://mukafaah:mukafaah_dev_only@db:5432/mukafaah
+      KEYS_DIR: /app/keys
+      OTP_DEV_ECHO: "true"
+      OTP_ALLOWED_COUNTRIES: LB
+      DEFAULT_PHONE_REGION: LB
+      # Browser test builds of the apps (tools\RUN-IN-BROWSER.bat).
+      CORS_ORIGINS: http://localhost:8080,http://localhost:8081
+      # Phones that are always Mukafaah Manager owners (comma separated, e.g. 70123456).
+      # Leave empty in development: the first person to sign in at /admin becomes the owner.
+      ADMIN_PHONES: ""
+    ports:
+      # Reachable from phones on the same Wi-Fi for testing.
+      - "3000:3000"
+    volumes:
+      - apikeys:/app/keys
+
+volumes:
+  pgdata:
+  apikeys:

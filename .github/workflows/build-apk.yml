@@ -1,0 +1,102 @@
+name: Build APKs
+
+# Builds the Customer and Business APKs and puts them on the "latest" release,
+# so they can be downloaded straight to a phone.
+#
+# The apps talk to the Mukafaah server running on your PC, so they need the
+# PC's address on your Wi-Fi (shown by START-SERVER, e.g. http://192.168.1.5:3000).
+# Set it once in Settings > Secrets and variables > Actions > Variables as API_URL,
+# or type it when you press "Run workflow".
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/**', 'packages/**', 'tools/platform/**', 'tools/ci/**', '.github/workflows/build-apk.yml']
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Server address the apps use (your PC on Wi-Fi)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      API_URL: ${{ inputs.api_url || vars.API_URL || 'http://192.168.1.5:3000' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Shared packages
+        run: |
+          (cd packages/mk_core && flutter pub get)
+          (cd packages/mk_ui && flutter pub get)
+
+      - name: Prepare Customer app
+        working-directory: apps/customer_app
+        run: |
+          [ -d android ] || flutter create --org app.mukafaah --project-name mukafaah_customer --platforms=android --no-pub .
+          rm -f test/widget_test.dart
+          python3 ../../tools/ci/patch_android.py . "Mukafaah" 0 1
+          cp -r ../../tools/platform/customer/android/. android/ 2>/dev/null || true
+          flutter pub get
+
+      - name: Prepare Business app
+        working-directory: apps/business_app
+        run: |
+          [ -d android ] || flutter create --org app.mukafaah --project-name mukafaah_business --platforms=android --no-pub .
+          rm -f test/widget_test.dart
+          python3 ../../tools/ci/patch_android.py . "Mukafaah Business" 1 0
+          cp -r ../../tools/platform/business/android/. android/ 2>/dev/null || true
+          flutter pub get
+
+      - name: Build Customer APK
+        working-directory: apps/customer_app
+        run: flutter build apk --release --dart-define=ENV=dev --dart-define=API_URL=$API_URL
+
+      - name: Build Business APK
+        working-directory: apps/business_app
+        run: flutter build apk --release --dart-define=ENV=dev --dart-define=API_URL=$API_URL
+
+      - name: Collect
+        run: |
+          mkdir -p dist
+          cp apps/customer_app/build/app/outputs/flutter-apk/app-release.apk dist/Mukafaah-Customer.apk
+          cp apps/business_app/build/app/outputs/flutter-apk/app-release.apk dist/Mukafaah-Business.apk
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mukafaah-apks
+          path: dist/*.apk
+          retention-days: 14
+
+      - name: Publish to the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest dist/*.apk \
+            --title "Mukafaah APKs (${GITHUB_SHA::7})" \
+            --notes "Built from ${GITHUB_SHA::7}. Server address baked in: $API_URL. Open this page on your phone and tap an APK to install it."

@@ -1,0 +1,25 @@
+# Flutter / Dart
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock.bak
+*.iml
+.idea/
+# Android / iOS local
+local.properties
+**/android/key.properties
+**/android/app/*.jks
+**/ios/Pods/
+# Node
+node_modules/
+dist/
+# Secrets and keys - never commit
+.env
+*.env
+backend/keys/
+**/google-services.json
+**/GoogleService-Info.plist
+# Logs and outputs
+tools/logs/
+tools/admin-phone.txt

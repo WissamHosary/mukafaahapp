@@ -1,0 +1,6 @@
+analyzer:
+  language:
+    strict-casts: false
+  errors:
+    deprecated_member_use: ignore
+    dead_code: ignore
