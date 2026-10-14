@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:mk_core/mk_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -100,7 +101,27 @@ final transactionsProvider = FutureProvider<List<WalletTx>>((ref) => ref.watch(a
 final prePointsProvider = FutureProvider<PrePoints>((ref) => ref.watch(apiProvider).prePoints());
 final businessesProvider = FutureProvider<List<BusinessSummary>>((ref) => ref.watch(apiProvider).businesses());
 
-final homeProvider = FutureProvider<HomeData>((ref) => ref.watch(apiProvider).home());
+/// Where the member is, only if they already allowed location (never asks).
+/// Used to put nearby shops, offers and rewards first.
+final myLocationProvider = FutureProvider<({double lat, double lng})?>((ref) async {
+  try {
+    if (!await Geolocator.isLocationServiceEnabled()) return null;
+    final p = await Geolocator.checkPermission();
+    if (p != LocationPermission.always && p != LocationPermission.whileInUse) return null;
+    final pos = await Geolocator.getLastKnownPosition() ??
+        await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium, timeLimit: Duration(seconds: 5)),
+        );
+    return (lat: pos.latitude, lng: pos.longitude);
+  } on Object {
+    return null;
+  }
+});
+
+final homeProvider = FutureProvider<HomeData>((ref) async {
+  final at = await ref.watch(myLocationProvider.future);
+  return ref.watch(apiProvider).home(lat: at?.lat, lng: at?.lng);
+});
 
 /// Categories managed in Mukafaah Manager (names, emoji, icons, order).
 final categoriesProvider = FutureProvider<List<CategoryInfo>>((ref) => ref.watch(apiProvider).categories());
@@ -108,8 +129,14 @@ final shopsProvider = FutureProvider.family<({int total, List<ShopCard> shops}),
   (ref, q) => ref.watch(apiProvider).shops(q),
 );
 final shopProvider = FutureProvider.family<ShopDetail, String>((ref, id) => ref.watch(apiProvider).shop(id));
-final offersProvider = FutureProvider.family<List<Offer>, String?>((ref, c) => ref.watch(apiProvider).offers(category: c));
-final rewardsProvider = FutureProvider.family<List<Reward>, String?>((ref, c) => ref.watch(apiProvider).rewards(category: c));
+final offersProvider = FutureProvider.family<List<Offer>, String?>((ref, c) async {
+  final at = await ref.watch(myLocationProvider.future);
+  return ref.watch(apiProvider).offers(category: c, lat: at?.lat, lng: at?.lng);
+});
+final rewardsProvider = FutureProvider.family<List<Reward>, String?>((ref, c) async {
+  final at = await ref.watch(myLocationProvider.future);
+  return ref.watch(apiProvider).rewards(category: c, lat: at?.lat, lng: at?.lng);
+});
 final bookingsProvider = FutureProvider<List<Booking>>((ref) => ref.watch(apiProvider).bookings());
 final historyProvider = FutureProvider.family<HistoryData, String>((ref, f) => ref.watch(apiProvider).history(filter: f));
 final tierProvider = FutureProvider<TierData>((ref) => ref.watch(apiProvider).tier(ref.watch(localeProvider) == 'ar'));

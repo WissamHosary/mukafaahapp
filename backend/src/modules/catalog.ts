@@ -48,7 +48,46 @@ const zOffers = z.object({
   category: z.string().regex(/^[A-Z0-9_]{2,40}$/).optional(),
   businessId: zUuid.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(60),
+  // The member's location: when given, places near them come first.
+  lat: z.coerce.number().min(-90).max(90).optional(),
+  lng: z.coerce.number().min(-180).max(180).optional(),
 });
+const zHome = z.object({
+  lat: z.coerce.number().min(-90).max(90).optional(),
+  lng: z.coerce.number().min(-180).max(180).optional(),
+});
+
+/** Within this distance a place counts as "near you". */
+const NEAR_KM = 5;
+
+/** Straight-line distance in km, or null when either point is unknown. */
+function distanceKm(lat1?: number | null, lng1?: number | null, lat2?: number | null, lng2?: number | null): number | null {
+  if (lat1 == null || lng1 == null || lat2 == null || lng2 == null) return null;
+  const rad = Math.PI / 180;
+  const a =
+    Math.sin(((lat2 - lat1) * rad) / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(((lng2 - lng1) * rad) / 2) ** 2;
+  return Math.round(12742 * Math.asin(Math.sqrt(a)) * 10) / 10;
+}
+
+/**
+ * Adds distanceKm and isNear to each item, then puts places near the member
+ * first (closest first) and keeps the original order for the rest.
+ */
+function nearFirst<T extends { distanceKm?: number | null }>(items: Array<T & { _lat?: number | null; _lng?: number | null }>, lat?: number, lng?: number) {
+  const out = items.map((x, i) => {
+    const { _lat, _lng, ...rest } = x;
+    const d = distanceKm(lat, lng, _lat, _lng);
+    return { item: { ...rest, distanceKm: d, isNear: d != null && d <= NEAR_KM }, i, d };
+  });
+  out.sort((a, b) => {
+    const an = a.d != null && a.d <= NEAR_KM;
+    const bn = b.d != null && b.d <= NEAR_KM;
+    if (an !== bn) return an ? -1 : 1;
+    if (an && bn) return (a.d as number) - (b.d as number);
+    return a.i - b.i;
+  });
+  return out.map((x) => x.item);
+}
 const zRating = z.strictObject({ stars: z.number().int().min(1).max(5), comment: z.string().trim().max(500).optional() });
 
 const LIVE_OFFER = `o.status = 'ACTIVE' AND NOT o.hidden_by_admin AND o.valid_from <= current_date AND (o.valid_to IS NULL OR o.valid_to >= current_date)`;
@@ -86,13 +125,14 @@ export class CatalogController {
    * the order of sections come from Mukafaah Manager.
    */
   @Get('home')
-  async home(@Auth() a: UserAuth) {
+  async home(@Auth() a: UserAuth, @Query() q: unknown) {
+    const at = parse(zHome, q ?? {});
     const [user, shops, offers, recent, pre, unread, totals, mukafaahPoints, banners, cats, blocks, tiers, support, layout] = await Promise.all([
       this.db.one(`SELECT name, referral_code, tier, lifetime_spend_minor FROM users WHERE id = $1`, [a.userId]),
       this.shops(a.userId, { sort: 'popular', limit: 200 }),
       this.db.query(
-        `SELECT ${OFFER_SELECT} FROM offers o JOIN businesses b ON b.id = o.business_id AND b.status = 'ACTIVE' AND b.listed
-          WHERE ${LIVE_OFFER} ORDER BY o.created_at DESC LIMIT 20`,
+        `SELECT ${OFFER_SELECT}, b.lat AS b_lat, b.lng AS b_lng FROM offers o JOIN businesses b ON b.id = o.business_id AND b.status = 'ACTIVE' AND b.listed
+          WHERE ${LIVE_OFFER} ORDER BY o.created_at DESC LIMIT 100`,
       ),
       this.recent(a.userId, 5),
       this.db.one(
@@ -122,32 +162,54 @@ export class CatalogController {
       .filter((c) => counts[c.key])
       .map((c) => ({ ...categoryJson(c), count: counts[c.key] }));
     const catByKey = new Map(cats.rows.map((c) => [c.key, c]));
-    const offerList = offers.rows.map(offerJson);
-    const byId = new Map(shops.map((s) => [s.id, s]));
+    const offerList = offers.rows.map((o) => ({ ...offerJson(o), distanceKm: distanceKm(at.lat, at.lng, o.b_lat, o.b_lng) }));
+    const offerById = new Map(offerList.map((o) => [o.id, o]));
+    const withDistance = shops.map((s) => ({ ...s, distanceKm: distanceKm(at.lat, at.lng, s.lat, s.lng) }));
+    const byId = new Map(withDistance.map((s) => [s.id, s]));
+    /** Nearest first when we know where the member is, otherwise the popularity order. */
+    const nearest = (list: typeof withDistance) =>
+      at.lat == null ? list : [...list].sort((x, y) => (x.distanceKm ?? 1e9) - (y.distanceKm ?? 1e9));
+    const picked = <T,>(ids: string[], map: Map<string, T>) => ids.map((id) => map.get(id)).filter((x): x is T => !!x);
     const out: any[] = [];
+    const shown = new Set<string>();
     let rewardList: any[] | undefined;
     for (const b of blocks.rows) {
-      const base = { id: b.id, type: b.type, titleEn: b.title_en ?? null, titleAr: b.title_ar ?? null, categoryKey: b.category_key ?? null };
+      const base = {
+        id: b.id,
+        type: b.type,
+        titleEn: b.title_en ?? null,
+        titleAr: b.title_ar ?? null,
+        categoryKey: b.category_key ?? null,
+        layout: b.layout ?? (b.type === 'DISCOVER_SHOPS' ? 'GRID' : b.type === 'FEATURED_SHOPS' ? 'CAROUSEL' : 'ROW'),
+      };
       const max = Number(b.max_items);
+      const isPicked = b.pick_mode === 'PICKED';
       if (b.type === 'CATEGORIES') {
         if (categories.length) out.push(base);
       } else if (b.type === 'FEATURED_SHOPS') {
-        const list = shops.filter((s) => s.featured).slice(0, max);
+        const list = (isPicked ? picked(b.shop_ids, byId) : withDistance.filter((s) => s.featured)).slice(0, max);
+        list.forEach((s) => shown.add(s.id));
+        if (list.length) out.push({ ...base, shops: list });
+      } else if (b.type === 'DISCOVER_SHOPS') {
+        // Automatic: shops not already shown above, nearest first.
+        const list = (isPicked ? picked(b.shop_ids, byId) : nearest(withDistance.filter((s) => !shown.has(s.id)))).slice(0, max);
         if (list.length) out.push({ ...base, shops: list });
       } else if (b.type === 'NEW_OFFERS') {
-        const list = offerList.slice(0, max);
+        const list = (isPicked ? picked(b.offer_ids, offerById) : offerList).slice(0, max);
         if (list.length) out.push({ ...base, offers: list });
       } else if (b.type === 'CATEGORY_SHOPS') {
-        const list = shops.filter((s) => s.category === b.category_key).slice(0, max);
+        const list = withDistance.filter((s) => s.category === b.category_key).slice(0, max);
         const c = catByKey.get(b.category_key);
         if (list.length) out.push({ ...base, titleEn: base.titleEn ?? c?.name_en, titleAr: base.titleAr ?? c?.name_ar, shops: list });
       } else if (b.type === 'PICKED_SHOPS') {
-        const list = (b.shop_ids as string[]).map((id) => byId.get(id)).filter(Boolean).slice(0, max);
+        const list = picked(b.shop_ids, byId).slice(0, max);
         if (list.length) out.push({ ...base, shops: list });
       } else if (b.type === 'REWARDS') {
-        rewardList ??= await this.rewards(a, {});
-        const list = rewardList.slice(0, max);
-        if (list.length) out.push({ ...base, rewards: list });
+        rewardList ??= await this.rewards(a, { lat: at.lat, lng: at.lng });
+        const list = isPicked
+          ? picked(b.reward_ids, new Map(rewardList.map((r) => [r.id, r])))
+          : rewardList;
+        if (list.length) out.push({ ...base, rewards: list.slice(0, max) });
       } else if (b.type === 'RECENT_ACTIVITY') {
         if (recent.length) out.push(base);
       } else {
@@ -188,7 +250,7 @@ export class CatalogController {
       blocks: out,
       support: { whatsapp: support.whatsapp ?? null, instagram: support.instagram ?? null },
       // Simple lists kept for older app builds.
-      featured: shops.filter((s) => s.featured).slice(0, 12),
+      featured: withDistance.filter((s) => s.featured).slice(0, 12),
       sections: categories.map((c) => ({ category: c.key, shops: shops.filter((s) => s.category === c.key).slice(0, 12) })),
       offers: offerList.slice(0, 10),
       recent,
@@ -336,12 +398,13 @@ export class CatalogController {
   async offers(@Query() q: unknown) {
     const f = parse(zOffers, q);
     const r = await this.db.query(
-      `SELECT ${OFFER_SELECT} FROM offers o JOIN businesses b ON b.id = o.business_id AND b.status = 'ACTIVE'
+      `SELECT ${OFFER_SELECT}, b.lat AS b_lat, b.lng AS b_lng FROM offers o JOIN businesses b ON b.id = o.business_id AND b.status = 'ACTIVE'
         WHERE ${LIVE_OFFER} AND ($1::text IS NULL OR b.category = $1) AND ($2::uuid IS NULL OR o.business_id = $2)
         ORDER BY o.created_at DESC LIMIT $3`,
       [f.category ?? null, f.businessId ?? null, f.limit],
     );
-    return r.rows.map(offerJson);
+    // Near the member first, then every other offer in Mukafaah.
+    return nearFirst(r.rows.map((o) => ({ ...offerJson(o), _lat: o.b_lat, _lng: o.b_lng })), f.lat, f.lng);
   }
 
   /** Rewards from every shop, with what the customer can already afford. */
@@ -349,7 +412,7 @@ export class CatalogController {
   async rewards(@Auth() a: UserAuth, @Query() q: unknown) {
     const f = parse(zOffers, q);
     const r = await this.db.query(
-      `SELECT ${REWARD_SELECT},
+      `SELECT ${REWARD_SELECT}, b.lat AS b_lat, b.lng AS b_lng,
               COALESCE((SELECT ab.balance FROM ledger_accounts la JOIN account_balances ab ON ab.account_id = la.id
                          WHERE la.program_id = p.id AND la.owner_type = 'CUSTOMER' AND la.owner_id = $1), 0) AS my_points
          FROM rewards w JOIN businesses b ON b.id = w.business_id AND b.status = 'ACTIVE'
@@ -362,7 +425,7 @@ export class CatalogController {
         LIMIT $4`,
       [a.userId, f.category ?? null, f.businessId ?? null, f.limit],
     );
-    return r.rows.map((x) => rewardJson(x, Number(x.my_points)));
+    return nearFirst(r.rows.map((x) => ({ ...rewardJson(x, Number(x.my_points)), _lat: x.b_lat, _lng: x.b_lng })), f.lat, f.lng);
   }
 }
 

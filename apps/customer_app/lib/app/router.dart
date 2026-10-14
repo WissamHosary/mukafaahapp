@@ -92,7 +92,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         pageBuilder: (c, s) => _fade(s, ShopsScreen(category: s.pathParameters['key'], standalone: true)),
       ),
       GoRoute(path: '/points', pageBuilder: (c, s) => _fade(s, const PointsScreen())),
-      GoRoute(path: '/offers', pageBuilder: (c, s) => _fade(s, const OffersScreen())),
+      GoRoute(
+        path: '/offers',
+        pageBuilder: (c, s) => _fade(s, OffersScreen(initialTab: s.uri.queryParameters['tab'] == 'rewards' ? 1 : 0)),
+      ),
       GoRoute(path: '/bookings', pageBuilder: (c, s) => _fade(s, const BookingsScreen())),
       GoRoute(path: '/tier', pageBuilder: (c, s) => _fade(s, const TierScreen())),
       GoRoute(path: '/transfer', pageBuilder: (c, s) => _fade(s, const TransferScreen())),

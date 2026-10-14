@@ -74,7 +74,11 @@ const zBanner = z.strictObject({
 const zBannerPatch = z.strictObject(bannerFields).partial();
 
 const sectionFields = {
-  type: z.enum(['CATEGORIES', 'FEATURED_SHOPS', 'NEW_OFFERS', 'CATEGORY_SHOPS', 'PICKED_SHOPS', 'REWARDS', 'RECENT_ACTIVITY']),
+  type: z.enum(['CATEGORIES', 'FEATURED_SHOPS', 'DISCOVER_SHOPS', 'NEW_OFFERS', 'CATEGORY_SHOPS', 'PICKED_SHOPS', 'REWARDS', 'RECENT_ACTIVITY']),
+  layout: z.enum(['CAROUSEL', 'GRID', 'ROW']).nullable().optional(),
+  pickMode: z.enum(['AUTO', 'PICKED']),
+  offerIds: z.array(zUuid).max(50),
+  rewardIds: z.array(zUuid).max(50),
   titleEn: z.string().trim().max(60).nullable().optional(),
   titleAr: z.string().trim().max(60).nullable().optional(),
   categoryKey: zKey.nullable().optional(),
@@ -86,6 +90,9 @@ const sectionFields = {
 const zSection = z.strictObject({
   ...sectionFields,
   shopIds: sectionFields.shopIds.default([]),
+  offerIds: sectionFields.offerIds.default([]),
+  rewardIds: sectionFields.rewardIds.default([]),
+  pickMode: sectionFields.pickMode.default('AUTO'),
   maxItems: sectionFields.maxItems.default(12),
   sort: sectionFields.sort.default(500),
   active: sectionFields.active.default(true),
@@ -196,6 +203,10 @@ const sectionJson = (s: any) => ({
   titleAr: s.title_ar,
   categoryKey: s.category_key,
   shopIds: s.shop_ids ?? [],
+  offerIds: s.offer_ids ?? [],
+  rewardIds: s.reward_ids ?? [],
+  layout: s.layout ?? null,
+  pickMode: s.pick_mode ?? 'AUTO',
   maxItems: s.max_items,
   sort: s.sort,
   active: s.active,
@@ -380,6 +391,21 @@ export class AdminController {
     return { ok: true };
   }
 
+  /** Removes a category. Shops in it must be moved to another category first. */
+  @Delete('categories/:key')
+  async deleteCategory(@Auth() a: AdminAuth, @Param('key') key: string, @ClientIp() ip: string) {
+    const k = parse(zKey, key);
+    await this.db.tx(async (c) => {
+      const used = (await c.query(`SELECT count(*)::int AS n FROM businesses WHERE category = $1`, [k])).rows[0].n;
+      if (used) throw new AppError(409, 'CATEGORY_IN_USE', `Move its ${used} shop${used === 1 ? '' : 's'} to another category first`, { shops: used });
+      await c.query(`DELETE FROM home_sections WHERE category_key = $1`, [k]);
+      const r = await c.query(`DELETE FROM categories WHERE key = $1`, [k]);
+      if (!r.rowCount) throw Errors.notFound('Category');
+    });
+    await this.log(a, 'category.delete', k, undefined, ip);
+    return { ok: true };
+  }
+
   // ---------- Banners ----------
   @Get('banners')
   async banners() {
@@ -462,9 +488,12 @@ export class AdminController {
     const b = parse(zSection, body);
     if (b.type === 'CATEGORY_SHOPS' && !b.categoryKey) throw Errors.validation({ categoryKey: ['REQUIRED'] });
     const r = await this.db.one(
-      `INSERT INTO home_sections(type, title_en, title_ar, category_key, shop_ids, max_items, sort, active)
-       VALUES ($1,$2,$3,$4,$5::uuid[],$6,$7,$8) RETURNING id`,
-      [b.type, b.titleEn ?? null, b.titleAr ?? null, b.categoryKey ?? null, b.shopIds, b.maxItems, b.sort, b.active],
+      `INSERT INTO home_sections(type, title_en, title_ar, category_key, shop_ids, max_items, sort, active, layout, pick_mode, offer_ids, reward_ids)
+       VALUES ($1,$2,$3,$4,$5::uuid[],$6,$7,$8,$9,$10,$11::uuid[],$12::uuid[]) RETURNING id`,
+      [
+        b.type, b.titleEn ?? null, b.titleAr ?? null, b.categoryKey ?? null, b.shopIds, b.maxItems, b.sort, b.active,
+        b.layout ?? null, b.pickMode, b.offerIds, b.rewardIds,
+      ],
     );
     await this.log(a, 'section.create', r.id, undefined, ip);
     return { id: r.id };
@@ -481,6 +510,10 @@ export class AdminController {
         title_ar: b.titleAr,
         category_key: b.categoryKey,
         shop_ids: b.shopIds,
+        offer_ids: b.offerIds,
+        reward_ids: b.rewardIds,
+        layout: b.layout,
+        pick_mode: b.pickMode,
         max_items: b.maxItems,
         sort: b.sort,
         active: b.active,
@@ -545,6 +578,20 @@ export class AdminController {
       validTo: o.vt ?? null,
       bookings: o.bookings,
     }));
+  }
+
+  /** Live rewards from every shop (for picking what "Rewards for you" shows). */
+  @Get('rewards')
+  async allRewards(@Query() q: unknown) {
+    const f = parse(zQ, q);
+    const r = await this.db.query(
+      `SELECT w.id, w.title, w.points_cost, w.status, b.name AS business_name
+         FROM rewards w JOIN businesses b ON b.id = w.business_id
+        WHERE w.status <> 'ARCHIVED' AND ($1::text IS NULL OR w.title ILIKE '%' || $1 || '%' OR b.name ILIKE '%' || $1 || '%')
+        ORDER BY b.name, w.points_cost LIMIT 300`,
+      [f.q || null],
+    );
+    return r.rows.map((w) => ({ id: w.id, title: w.title, businessName: w.business_name, pointsCost: Number(w.points_cost), status: w.status }));
   }
 
   @Patch('offers/:id')

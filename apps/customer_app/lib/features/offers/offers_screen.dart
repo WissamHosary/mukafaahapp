@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mk_core/mk_core.dart';
@@ -11,14 +12,17 @@ import '../shops/shop_screen.dart';
 
 /// Offers (book with the shop) and Rewards (spend points at the counter).
 class OffersScreen extends ConsumerStatefulWidget {
-  const OffersScreen({super.key});
+  const OffersScreen({this.initialTab = 0, super.key});
+
+  /// 0 = offers, 1 = rewards.
+  final int initialTab;
 
   @override
   ConsumerState<OffersScreen> createState() => _OffersScreenState();
 }
 
 class _OffersScreenState extends ConsumerState<OffersScreen> {
-  int _tab = 0;
+  late int _tab = widget.initialTab;
   String? _category;
 
   @override
@@ -83,11 +87,13 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
                   ),
                 ],
               )
-            : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, MkSpace.xxl),
-                itemCount: list.length,
-                separatorBuilder: (context, i) => const SizedBox(height: MkSpace.md),
-                itemBuilder: (context, i) => MkEntrance(index: i % 6, child: OfferTile(offer: list[i])),
+            : _NearFirstList(
+                near: [for (final o in list) if (o.isNear) o],
+                rest: [for (final o in list) if (!o.isNear) o],
+                distance: (o) => o.distanceKm,
+                gap: MkSpace.md,
+                allTitle: s.tr('كل العروض بمكافأة', 'All offers in Mukafaah'),
+                item: (o) => OfferTile(offer: o),
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => MkErrorState(title: errorText(s, e), retryLabel: s.retry, onRetry: () => ref.invalidate(offersProvider(_category))),
@@ -113,14 +119,175 @@ class _OffersScreenState extends ConsumerState<OffersScreen> {
                   ),
                 ],
               )
-            : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, MkSpace.xxl),
-                itemCount: list.length,
-                separatorBuilder: (context, i) => const SizedBox(height: MkSpace.sm),
-                itemBuilder: (context, i) => MkEntrance(index: i % 6, child: RewardTile(reward: list[i], showShop: true)),
+            : _NearFirstList(
+                near: [for (final r in list) if (r.isNear) r],
+                rest: [for (final r in list) if (!r.isNear) r],
+                distance: (r) => r.distanceKm,
+                gap: MkSpace.sm,
+                allTitle: s.tr('كل المكافآت بمكافأة', 'All rewards in Mukafaah'),
+                item: (r) => RewardTile(reward: r, showShop: true),
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => MkErrorState(title: errorText(s, e), retryLabel: s.retry, onRetry: () => ref.invalidate(rewardsProvider(_category))),
+      ),
+    );
+  }
+}
+
+/// Places near the member first ("Near you", with distances), then everything
+/// else in Mukafaah. Without location, a card offers to turn it on.
+class _NearFirstList<T> extends ConsumerWidget {
+  const _NearFirstList({
+    required this.near,
+    required this.rest,
+    required this.distance,
+    required this.item,
+    required this.allTitle,
+    required this.gap,
+  });
+
+  final List<T> near;
+  final List<T> rest;
+  final double? Function(T) distance;
+  final Widget Function(T) item;
+  final String allTitle;
+  final double gap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    final located = ref.watch(myLocationProvider).value != null;
+    String km(double d) => d < 1 ? '${(d * 1000).round()} ${s.tr('م', 'm')}' : '${d < 10 ? d.toStringAsFixed(1) : d.round()} ${s.tr('كم', 'km')}';
+    Widget head(String text, IconData icon, {Color color = MkColors.ink}) => Padding(
+          padding: const EdgeInsets.only(top: MkSpace.sm, bottom: MkSpace.sm),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: color),
+              const SizedBox(width: 6),
+              Text(text, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: color)),
+            ],
+          ),
+        );
+    var i = 0;
+    Widget tile(T x, {bool showKm = false}) {
+      final d = distance(x);
+      final w = MkEntrance(index: (i++) % 6, child: item(x));
+      return Padding(
+        padding: EdgeInsets.only(bottom: gap),
+        child: !showKm || d == null
+            ? w
+            : Stack(
+                children: [
+                  w,
+                  PositionedDirectional(
+                    end: 10,
+                    top: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(color: MkColors.purple900, borderRadius: MkRadius.all(MkRadius.pill)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.near_me_rounded, size: 12, color: MkColors.yellow500),
+                          const SizedBox(width: 4),
+                          Text(km(d), style: t.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, MkSpace.xxl),
+      children: [
+        if (!located) const _LocationCard(),
+        if (near.isNotEmpty) ...[
+          head(s.tr('حوالَيك', 'Near you'), Icons.near_me_rounded, color: MkColors.purple700),
+          for (final x in near) tile(x, showKm: true),
+          if (rest.isNotEmpty) head(allTitle, Icons.public_rounded),
+        ] else if (located && rest.isNotEmpty) ...[
+          MkCard(
+            color: MkColors.purple50,
+            child: Text(
+              s.tr('ما في شي حوالَيك هلّق. هيدي كل العروض بمكافأة.', 'Nothing near you right now. Here is everything in Mukafaah.'),
+              style: t.bodyMedium?.copyWith(color: MkColors.ink2),
+            ),
+          ),
+          SizedBox(height: gap),
+        ],
+        for (final x in rest) tile(x, showKm: false),
+      ],
+    );
+  }
+}
+
+/// Asks for location (only when tapped) so nearby places can come first.
+class _LocationCard extends ConsumerStatefulWidget {
+  const _LocationCard();
+
+  @override
+  ConsumerState<_LocationCard> createState() => _LocationCardState();
+}
+
+class _LocationCardState extends ConsumerState<_LocationCard> {
+  bool _busy = false;
+
+  Future<void> _turnOn() async {
+    final s = ref.read(stringsProvider);
+    setState(() => _busy = true);
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        await Geolocator.openLocationSettings();
+        return;
+      }
+      var p = await Geolocator.checkPermission();
+      if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
+      if (p == LocationPermission.deniedForever) {
+        if (mounted) MkToast.show(context, s.tr('فعّل الموقع لمكافأة من إعدادات تلفونك.', 'Allow location for Mukafaah in your phone settings.'));
+        await Geolocator.openAppSettings();
+        return;
+      }
+      ref
+        ..invalidate(myLocationProvider)
+        ..invalidate(offersProvider)
+        ..invalidate(rewardsProvider)
+        ..invalidate(homeProvider);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: MkSpace.md),
+      child: MkCard(
+        color: MkColors.purple900,
+        child: Row(
+          children: [
+            const Icon(Icons.near_me_rounded, color: MkColors.yellow500),
+            const SizedBox(width: MkSpace.sm),
+            Expanded(
+              child: Text(
+                s.tr('شوف العروض اللي حوالَيك أوّل', 'See what is near you first'),
+                style: t.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
+            ),
+            MkButton(
+              label: s.tr('فعّل الموقع', 'Turn on'),
+              kind: MkButtonKind.accent,
+              expand: false,
+              loading: _busy,
+              onPressed: _turnOn,
+            ),
+          ],
+        ),
       ),
     );
   }

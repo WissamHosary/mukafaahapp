@@ -1209,17 +1209,41 @@
           const title = `<div class="pv-sec">${esc(s.titleEn || SECTION_NAME[s.type] || s.type)}</div>`;
           if (s.type === 'CATEGORIES') return title + `<div class="pv-row">${cats.slice(0, 5).map((c) => `<div class="pv-cat"><div class="e" style="${c.color ? `background:${esc(c.color)}1f;color:${esc(c.color)}` : ''}">${c.iconUrl ? `<img src="${esc(c.iconUrl)}" alt="">` : esc(initials(c.nameEn))}</div>${esc(c.nameEn.split(' ')[0])}</div>`).join('')}</div>`;
           if (s.type === 'RECENT_ACTIVITY') return title + '<div class="pv-card wide"></div><div class="pv-card wide"></div>';
+          if (s.layout === 'GRID') return title + '<div class="pv-grid"><div class="pv-card"></div><div class="pv-card"></div><div class="pv-card"></div><div class="pv-card"></div></div>';
+          if (s.layout === 'CAROUSEL') return title + '<div class="pv-row"><div class="pv-card big"></div><div class="pv-card big"></div></div>';
           return title + '<div class="pv-row"><div class="pv-card"></div><div class="pv-card"></div><div class="pv-card"></div></div>';
         }).join('')}
       </div></div></div>${live.length ? '' : '<div class="pv-note">No live banners: the app hides the banner area.</div>'}`;
   }
 
   const SECTION_TYPES = [
-    ['CATEGORIES', 'Categories row'], ['FEATURED_SHOPS', 'Featured shops'], ['NEW_OFFERS', 'Newest offers'], ['CATEGORY_SHOPS', 'Shops from one category'],
-    ['PICKED_SHOPS', 'Hand-picked shops'], ['REWARDS', 'Rewards to redeem'], ['RECENT_ACTIVITY', 'Customer’s recent transactions'],
+    ['CATEGORIES', 'Categories row'], ['FEATURED_SHOPS', 'Featured shops'], ['NEW_OFFERS', 'New offers'], ['DISCOVER_SHOPS', 'More shops to discover'],
+    ['REWARDS', 'Rewards for you'], ['CATEGORY_SHOPS', 'Shops from one category'], ['PICKED_SHOPS', 'Hand-picked shops'], ['RECENT_ACTIVITY', 'Customer’s recent transactions'],
   ];
+  // Sections that can fill themselves or show only what the admin picks, and what they hold.
+  const PICKABLE = { FEATURED_SHOPS: 'shops', DISCOVER_SHOPS: 'shops', PICKED_SHOPS: 'shops', NEW_OFFERS: 'offers', REWARDS: 'rewards' };
+  const AUTO_TEXT = {
+    FEATURED_SHOPS: 'Automatic: shops marked “Featured” in Shops',
+    DISCOVER_SHOPS: 'Automatic: all other shops, nearest to the customer first',
+    NEW_OFFERS: 'Automatic: the newest live offers',
+    REWARDS: 'Automatic: rewards the customer can afford first',
+  };
+  const SHOP_LAYOUTS = [['CAROUSEL', 'Carousel', 'Big cards that slide'], ['GRID', 'Grid', 'Two per row, many shops'], ['ROW', 'Row', 'Small cards in one row']];
+  const hasLayout = (t) => ['FEATURED_SHOPS', 'DISCOVER_SHOPS', 'CATEGORY_SHOPS', 'PICKED_SHOPS'].includes(t);
+  const sectionSub = (s) => {
+    const bits = [SECTION_NAME[s.type] || s.type];
+    if (s.type === 'CATEGORY_SHOPS') bits.push(catName(s.categoryKey));
+    const kind = PICKABLE[s.type];
+    if (kind && (s.pickMode === 'PICKED' || s.type === 'PICKED_SHOPS')) {
+      const n = (kind === 'shops' ? s.shopIds : kind === 'offers' ? s.offerIds : s.rewardIds).length;
+      bits.push(`${n} picked`);
+    } else if (kind) bits.push('automatic');
+    if (hasLayout(s.type) && s.layout) bits.push(SHOP_LAYOUTS.find((l) => l[0] === s.layout)?.[1] || s.layout);
+    bits.push(`up to ${s.maxItems}`);
+    return bits.join(' · ');
+  };
   const SECTION_NAME = Object.fromEntries(SECTION_TYPES);
-  const SECTION_ICON = { CATEGORIES: 'grid', FEATURED_SHOPS: 'star', NEW_OFFERS: 'tag', CATEGORY_SHOPS: 'store', PICKED_SHOPS: 'pin', REWARDS: 'gift', RECENT_ACTIVITY: 'receipt' };
+  const SECTION_ICON = { CATEGORIES: 'grid', FEATURED_SHOPS: 'star', DISCOVER_SHOPS: 'store', NEW_OFFERS: 'tag', CATEGORY_SHOPS: 'store', PICKED_SHOPS: 'pin', REWARDS: 'gift', RECENT_ACTIVITY: 'receipt' };
   async function pageHome() {
     crumbs([['Customer app'], ['Home screen']]);
     loading('Home screen');
@@ -1231,7 +1255,7 @@
           <div class="item ${s.active ? '' : 'off'}" data-id="${esc(s.id)}">
             <span class="handle" title="Drag to reorder">${ic('drag', 'sm')}</span>
             <span class="ico">${s.type === 'CATEGORY_SHOPS' ? catTile(S.categories.find((c) => c.key === s.categoryKey)) : ic(SECTION_ICON[s.type] || 'grid', 'sm')}</span>
-            <div class="body"><b>${esc(s.titleEn || SECTION_NAME[s.type])}</b><small>${esc(SECTION_NAME[s.type] || s.type)}${s.type === 'CATEGORY_SHOPS' ? ' · ' + esc(catName(s.categoryKey)) : ''}${s.type === 'PICKED_SHOPS' ? ' · ' + s.shopIds.length + ' shops' : ''} · up to ${esc(s.maxItems)}</small></div>
+            <div class="body"><b>${esc(s.titleEn || SECTION_NAME[s.type])}</b><small>${esc(sectionSub(s))}</small></div>
             <div class="ctl">${toggle('active', s.active, 'data-active aria-label="Show in app"')}
               <button class="btn ghost icon sm" data-up aria-label="Move up">${ic('up', 'sm')}</button><button class="btn ghost icon sm" data-down aria-label="Move down">${ic('down', 'sm')}</button>
               <button class="btn ghost icon sm" data-edit aria-label="Edit">${ic('edit', 'sm')}</button><button class="btn ghost icon sm" data-del aria-label="Remove">${ic('trash', 'sm')}</button></div>
@@ -1263,12 +1287,18 @@
     $('#add', v).onclick = () => editSection(null);
     drawPreview();
   }
-  function editSection(s) {
-    const picked = new Set(s?.shopIds || []);
+  async function editSection(s) {
+    const type0 = s?.type || 'FEATURED_SHOPS';
+    const picks = { shops: [...(s?.shopIds || [])], offers: [...(s?.offerIds || [])], rewards: [...(s?.rewardIds || [])] };
+    let offers = null, rewards = null;
     const f = modal(s ? 'Edit section' : 'New home section', `
-      <label class="f"><span>Type</span><select class="in" name="type">${SECTION_TYPES.map(([k, t]) => opt(k, t, s?.type || 'CATEGORY_SHOPS')).join('')}</select></label>
+      <label class="f"><span>Type</span><select class="in" name="type">${SECTION_TYPES.map(([k, t]) => opt(k, t, type0)).join('')}</select></label>
       <div id="catbox"><label class="f"><span>Category</span><select class="in" name="categoryKey">${S.categories.map((c) => opt(c.key, c.nameEn, s?.categoryKey)).join('')}</select></label></div>
-      <div id="shopbox"><label class="f"><span>Shops</span><div class="picker"><div class="ps"><div class="inwrap">${ic('search', 'sm')}<input class="in sm" id="shopq" placeholder="Search shops"></div></div><div class="pl" id="shops"></div><div class="pf" id="pcount"></div></div></label></div>
+      <div id="modebox"><span class="flabel">What to show</span>
+        <div class="seg2"><label><input type="radio" name="pickMode" value="AUTO" ${s?.pickMode !== 'PICKED' ? 'checked' : ''}><span id="autoText">Automatic</span></label>
+        <label><input type="radio" name="pickMode" value="PICKED" ${s?.pickMode === 'PICKED' ? 'checked' : ''}><span>Only the ones I pick</span></label></div></div>
+      <div id="pickbox"><label class="f"><span id="pickLabel">Pick</span><div class="picker"><div class="ps"><div class="inwrap">${ic('search', 'sm')}<input class="in sm" id="pq" placeholder="Search"></div></div><div class="pl" id="plist"></div><div class="pf" id="pcount"></div></div></label></div>
+      <div id="layoutbox"><span class="flabel">How it looks</span><div class="layouts">${SHOP_LAYOUTS.map(([k, t, d]) => `<label class="lay"><input type="radio" name="layout" value="${k}" ${(s?.layout || (type0 === 'DISCOVER_SHOPS' ? 'GRID' : type0 === 'FEATURED_SHOPS' ? 'CAROUSEL' : 'ROW')) === k ? 'checked' : ''}><b>${t}</b><small>${d}</small></label>`).join('')}</div></div>
       <div class="fgrid">
         <label class="f"><span>Title (English)</span><input class="in" name="titleEn" maxlength="60" value="${esc(s?.titleEn)}"></label>
         <label class="f"><span>Title (Arabic)</span><input class="in ar" name="titleAr" maxlength="60" value="${esc(s?.titleAr)}"></label>
@@ -1276,30 +1306,66 @@
       <label class="f"><span>Most items to show</span><input class="in" type="number" name="maxItems" min="1" max="50" value="${esc(s?.maxItems ?? 12)}"></label>`,
     async (form) => {
       const type = val(form, 'type');
-      const body = { type, titleEn: orNull(val(form, 'titleEn')), titleAr: orNull(val(form, 'titleAr')), maxItems: Math.max(1, Math.min(50, Math.round(Number(val(form, 'maxItems')) || 12))) };
-      body.categoryKey = type === 'CATEGORY_SHOPS' ? val(form, 'categoryKey') : null;
-      body.shopIds = type === 'PICKED_SHOPS' ? [...picked] : [];
-      if (type === 'PICKED_SHOPS' && !body.shopIds.length) { toast('Pick at least one shop.', true); return false; }
+      const kind = PICKABLE[type];
+      const mode = type === 'PICKED_SHOPS' ? 'PICKED' : kind ? form.querySelector('[name="pickMode"]:checked')?.value || 'AUTO' : 'AUTO';
+      const body = {
+        type, titleEn: orNull(val(form, 'titleEn')), titleAr: orNull(val(form, 'titleAr')),
+        maxItems: Math.max(1, Math.min(50, Math.round(Number(val(form, 'maxItems')) || 12))),
+        pickMode: mode,
+        layout: hasLayout(type) ? form.querySelector('[name="layout"]:checked')?.value || null : null,
+        categoryKey: type === 'CATEGORY_SHOPS' ? val(form, 'categoryKey') : null,
+        shopIds: kind === 'shops' && mode === 'PICKED' ? picks.shops : [],
+        offerIds: kind === 'offers' && mode === 'PICKED' ? picks.offers : [],
+        rewardIds: kind === 'rewards' && mode === 'PICKED' ? picks.rewards : [],
+      };
+      if (mode === 'PICKED' && kind && !body[kind === 'shops' ? 'shopIds' : kind === 'offers' ? 'offerIds' : 'rewardIds'].length) { toast(`Pick at least one ${kind.slice(0, -1)}.`, true); return false; }
       if (type === 'CATEGORY_SHOPS' && !body.titleEn) { body.titleEn = catName(body.categoryKey); body.titleAr = body.titleAr || S.categories.find((c) => c.key === body.categoryKey)?.nameAr || null; }
       if (s) await api('PATCH', '/v1/admin/sections/' + s.id, body); else await api('POST', '/v1/admin/sections', body);
       toast('Home screen updated');
       pageHome();
     });
-    const drawShops = () => {
-      const q = ($('#shopq', f).value || '').toLowerCase();
-      $('#shops', f).innerHTML = S.shops.filter((x) => picked.has(x.id) || !q || x.name.toLowerCase().includes(q)).slice(0, 80)
-        .map((x) => `<label><input type="checkbox" data-shop="${esc(x.id)}" ${picked.has(x.id) ? 'checked' : ''}><span>${esc(x.name)}</span><span class="spacer"></span><small class="muted">${esc(x.city || '')}</small></label>`).join('') || '<div class="empty-s muted" style="padding:12px">No shops yet.</div>';
-      $('#pcount', f).textContent = `${picked.size} picked`;
+    const kindNow = () => PICKABLE[val(f, 'type')];
+    const items = async (kind) => {
+      if (kind === 'shops') return S.shops.map((x) => ({ id: x.id, name: x.name, sub: x.city || '' }));
+      if (kind === 'offers') { offers ??= await api('GET', '/v1/admin/offers'); return offers.filter((o) => o.status === 'ACTIVE' && !o.hidden).map((o) => ({ id: o.id, name: o.title, sub: o.businessName })); }
+      rewards ??= await api('GET', '/v1/admin/rewards'); return rewards.filter((r) => r.status === 'ACTIVE').map((r) => ({ id: r.id, name: r.title, sub: `${r.businessName} · ${r.pointsCost.toLocaleString()} pts` }));
     };
+    const drawPicks = async () => {
+      const kind = kindNow(); if (!kind) return;
+      const list = await items(kind).catch(() => []);
+      const chosen = picks[kind];
+      const q = ($('#pq', f).value || '').toLowerCase();
+      const shown = [...chosen.map((id) => list.find((x) => x.id === id)).filter(Boolean), ...list.filter((x) => !chosen.includes(x.id) && (!q || (x.name + ' ' + x.sub).toLowerCase().includes(q)))].slice(0, 120);
+      $('#plist', f).innerHTML = shown.map((x) => `<label><input type="checkbox" data-pick="${esc(x.id)}" ${chosen.includes(x.id) ? 'checked' : ''}><span>${esc(x.name)}</span><span class="spacer"></span><small class="muted">${esc(x.sub)}</small></label>`).join('') || `<div class="empty-s muted" style="padding:12px">Nothing to pick yet.</div>`;
+      $('#pcount', f).textContent = `${chosen.length} picked · shown in the order you pick them`;
+    };
+    let layoutTouched = !!s?.layout;
+    f.querySelectorAll('[name="layout"]').forEach((r) => r.addEventListener('change', () => (layoutTouched = true)));
     const sync = () => {
-      const t = val(f, 'type');
+      const t = val(f, 'type'); const kind = PICKABLE[t];
+      if (!layoutTouched) {
+        const def = t === 'DISCOVER_SHOPS' ? 'GRID' : t === 'FEATURED_SHOPS' ? 'CAROUSEL' : 'ROW';
+        const r = f.querySelector(`[name="layout"][value="${def}"]`); if (r) r.checked = true;
+      }
+      const mode = t === 'PICKED_SHOPS' ? 'PICKED' : f.querySelector('[name="pickMode"]:checked')?.value;
       $('#catbox', f).hidden = t !== 'CATEGORY_SHOPS';
-      $('#shopbox', f).hidden = t !== 'PICKED_SHOPS';
+      $('#modebox', f).hidden = !kind || t === 'PICKED_SHOPS';
+      $('#autoText', f).textContent = AUTO_TEXT[t] || 'Automatic';
+      $('#pickbox', f).hidden = !kind || mode !== 'PICKED';
+      $('#pickLabel', f).textContent = kind === 'offers' ? 'Offers to show' : kind === 'rewards' ? 'Rewards to show' : 'Shops to show';
+      $('#layoutbox', f).hidden = !hasLayout(t);
+      drawPicks();
     };
-    $('#shops', f).addEventListener('change', (e) => { const c = e.target.closest('[data-shop]'); if (!c) return; c.checked ? picked.add(c.dataset.shop) : picked.delete(c.dataset.shop); $('#pcount', f).textContent = `${picked.size} picked`; });
-    $('#shopq', f).oninput = drawShops;
+    $('#plist', f).addEventListener('change', (e) => {
+      const c = e.target.closest('[data-pick]'); if (!c) return;
+      const arr = picks[kindNow()]; const id = c.dataset.pick;
+      if (c.checked) { if (!arr.includes(id)) arr.push(id); } else arr.splice(arr.indexOf(id), 1);
+      $('#pcount', f).textContent = `${arr.length} picked · shown in the order you pick them`;
+    });
+    $('#pq', f).oninput = drawPicks;
     f.elements.type.onchange = sync;
-    sync(); drawShops();
+    f.querySelectorAll('[name="pickMode"]').forEach((r) => (r.onchange = sync));
+    sync();
   }
 
   // ---------- Banners ----------
@@ -1489,6 +1555,17 @@
       pageCategories();
     });
     wireDrop(f, 'iconMediaId', 512);
+    if (c) {
+      const del = document.createElement('button');
+      del.type = 'button'; del.className = 'btn ghost danger'; del.style.marginRight = 'auto';
+      del.innerHTML = `${ic('trash', 'sm')} Delete category`;
+      del.onclick = async () => {
+        if (c.shops) { toast(`Move its ${c.shops} shop${c.shops === 1 ? '' : 's'} to another category first.`, true); return; }
+        if (!(await confirmBox('Delete category?', `“${c.nameEn}” disappears from the app.`))) return;
+        try { await api('DELETE', '/v1/admin/categories/' + c.key); f.close(); toast('Category deleted'); pageCategories(); } catch (err) { fail(err); }
+      };
+      $('.mf', f).prepend(del);
+    }
     const preview = () => {
       const img = $('[data-drop=iconMediaId] img', f);
       const tile = { nameEn: val(f, 'nameEn') || 'Category', color, iconUrl: img ? img.getAttribute('src') : null };

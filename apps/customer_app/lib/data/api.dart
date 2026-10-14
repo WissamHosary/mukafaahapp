@@ -163,6 +163,7 @@ class ShopCard {
     this.lng,
     this.logoUrl,
     this.coverUrl,
+    this.distanceKm,
   });
   factory ShopCard.fromJson(Json j) => ShopCard(
         id: j['id'] as String,
@@ -184,6 +185,7 @@ class ShopCard {
         lng: (j['lng'] as num?)?.toDouble(),
         logoUrl: _s(j['logoUrl']),
         coverUrl: _s(j['coverUrl']),
+        distanceKm: (j['distanceKm'] as num?)?.toDouble(),
       );
   final String id;
   final String name;
@@ -204,6 +206,9 @@ class ShopCard {
   final double? lng;
   final String? logoUrl;
   final String? coverUrl;
+
+  /// How far the shop is from the member, when the app knows where they are.
+  final double? distanceKm;
 
   String get place => [address, city].whereType<String>().where((e) => e.isNotEmpty).join(', ');
   String get earnText => earnPercent == earnPercent.roundToDouble() ? earnPercent.toStringAsFixed(0) : earnPercent.toStringAsFixed(1);
@@ -228,6 +233,8 @@ class Offer {
     this.discountPercent,
     this.validTo,
     this.myOpenBooking,
+    this.distanceKm,
+    this.isNear = false,
   });
   factory Offer.fromJson(Json j) => Offer(
         id: j['id'] as String,
@@ -247,6 +254,8 @@ class Offer {
         validFrom: (j['validFrom'] ?? '') as String,
         validTo: _s(j['validTo']),
         myOpenBooking: _s(j['myOpenBooking']),
+        distanceKm: (j['distanceKm'] as num?)?.toDouble(),
+        isNear: j['isNear'] == true,
       );
   final String id;
   final String businessId;
@@ -265,6 +274,10 @@ class Offer {
   final String validFrom;
   final String? validTo;
   final String? myOpenBooking;
+  final double? distanceKm;
+
+  /// Within a few km of the member (shown first).
+  final bool isNear;
 }
 
 class Reward {
@@ -280,6 +293,8 @@ class Reward {
     this.description,
     this.imageUrl,
     this.businessLogoUrl,
+    this.distanceKm,
+    this.isNear = false,
   });
   factory Reward.fromJson(Json j) => Reward(
         id: j['id'] as String,
@@ -293,6 +308,8 @@ class Reward {
         valueMinor: _i(j['valueMinor']),
         myPoints: _i(j['myPoints']),
         canAfford: j['canAfford'] == true,
+        distanceKm: (j['distanceKm'] as num?)?.toDouble(),
+        isNear: j['isNear'] == true,
       );
   final String id;
   final String businessId;
@@ -305,6 +322,8 @@ class Reward {
   final int valueMinor;
   final int myPoints;
   final bool canAfford;
+  final double? distanceKm;
+  final bool isNear;
 }
 
 class Product {
@@ -691,6 +710,7 @@ class HomeBlock {
     this.titleEn,
     this.titleAr,
     this.categoryKey,
+    this.layout = 'ROW',
     this.shops = const [],
     this.offers = const [],
     this.rewards = const [],
@@ -698,6 +718,7 @@ class HomeBlock {
   factory HomeBlock.fromJson(Json j) => HomeBlock(
         id: j['id'] as String,
         type: j['type'] as String,
+        layout: _s(j['layout']) ?? (j['type'] == 'FEATURED_SHOPS' ? 'CAROUSEL' : j['type'] == 'DISCOVER_SHOPS' ? 'GRID' : 'ROW'),
         titleEn: _s(j['titleEn']),
         titleAr: _s(j['titleAr']),
         categoryKey: _s(j['categoryKey']),
@@ -707,8 +728,11 @@ class HomeBlock {
       );
   final String id;
 
-  /// CATEGORIES, FEATURED_SHOPS, NEW_OFFERS, CATEGORY_SHOPS, PICKED_SHOPS, REWARDS or RECENT_ACTIVITY.
+  /// CATEGORIES, FEATURED_SHOPS, DISCOVER_SHOPS, NEW_OFFERS, CATEGORY_SHOPS, PICKED_SHOPS, REWARDS or RECENT_ACTIVITY.
   final String type;
+
+  /// How a shop section looks, chosen in Mukafaah Manager: CAROUSEL, GRID or ROW.
+  final String layout;
   final String? titleEn;
   final String? titleAr;
   final String? categoryKey;
@@ -1167,7 +1191,10 @@ class CustomerApi {
   // ---------- v0.2 ----------
   String? url(String? path) => client.resolve(path);
 
-  Future<HomeData> home() async => HomeData.fromJson(await client.get<Json>('/v1/customer/home'));
+  /// With the member's location (when allowed) nearby shops come first.
+  Future<HomeData> home({double? lat, double? lng}) async => HomeData.fromJson(
+        await client.get<Json>('/v1/customer/home', query: {if (lat != null) 'lat': lat, if (lng != null) 'lng': lng}),
+      );
 
   Future<List<CategoryInfo>> categories() async =>
       (await client.get<List<dynamic>>('/v1/customer/categories')).map((e) => CategoryInfo.fromJson(e as Json)).toList();
@@ -1192,13 +1219,20 @@ class CustomerApi {
 
   Future<void> rate(String shopId, int stars) => client.put<Json>('/v1/customer/shops/$shopId/rating', data: {'stars': stars});
 
-  Future<List<Offer>> offers({String? category}) async {
-    final d = await client.get<List<dynamic>>('/v1/customer/offers', query: {if (category != null) 'category': category});
+  /// Places near the member come first (isNear), then every other offer in Mukafaah.
+  Future<List<Offer>> offers({String? category, double? lat, double? lng}) async {
+    final d = await client.get<List<dynamic>>(
+      '/v1/customer/offers',
+      query: {if (category != null) 'category': category, if (lat != null) 'lat': lat, if (lng != null) 'lng': lng},
+    );
     return d.map((e) => Offer.fromJson(e as Json)).toList();
   }
 
-  Future<List<Reward>> rewards({String? category}) async {
-    final d = await client.get<List<dynamic>>('/v1/customer/rewards', query: {if (category != null) 'category': category});
+  Future<List<Reward>> rewards({String? category, double? lat, double? lng}) async {
+    final d = await client.get<List<dynamic>>(
+      '/v1/customer/rewards',
+      query: {if (category != null) 'category': category, if (lat != null) 'lat': lat, if (lng != null) 'lng': lng},
+    );
     return d.map((e) => Reward.fromJson(e as Json)).toList();
   }
 

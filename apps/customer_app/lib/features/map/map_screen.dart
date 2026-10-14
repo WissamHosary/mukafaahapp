@@ -74,11 +74,14 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
       );
       if (!mounted) return;
       final me = LatLng(pos.latitude, pos.longitude);
+      final first = _me == null;
       setState(() {
         _me = me;
         _loc = _Loc.on;
       });
       _fly(me, 12.5);
+      // Location is now allowed: home, offers and rewards can put nearby places first.
+      if (first && ref.read(myLocationProvider).value == null) ref.invalidate(myLocationProvider);
     } catch (_) {
       if (mounted) setState(() => _loc = _me == null ? _Loc.idle : _Loc.on);
     }
