@@ -310,6 +310,11 @@ class S {
         _ => type,
       };
   String errorV2(String code) => switch (code) {
+        'ORDER_OPEN_LIMIT' => tr('عندك طلبات لسا ناطرة تأكيد بهالمحل. استنى المحل يأكدها.', 'You already have orders waiting at this shop. Wait for the shop to confirm them.'),
+        'ORDER_DAY_LIMIT' => tr('وصلت للحد اليومي للطلبات', "You've reached today's order limit"),
+        'ORDER_TOO_LARGE' => tr('الطلب كبير كتير. حكي المحل مباشرة.', 'This order is too large. Please arrange it with the shop directly.'),
+        'CHOOSE_OPTIONS' => tr('اختار الخيارات لكل منتج', 'Choose the options for every item'),
+        'OUT_OF_STOCK' => tr('خلصت الكمية من منتج', 'An item ran out of stock'),
         'OFFER_UNAVAILABLE' => tr('العرض مش متوفر', 'This offer is no longer available'),
         'BOOKING_EXISTS' => tr('عندك حجز لهالعرض', 'You already booked this offer'),
         'OFFER_LIMIT_REACHED' => tr('استعملت هالعرض', 'This offer was already used'),

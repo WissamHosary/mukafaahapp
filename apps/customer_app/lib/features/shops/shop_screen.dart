@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +14,7 @@ import '../../app/providers.dart';
 import '../../data/api.dart';
 import '../common/common.dart';
 import '../common/map_style.dart';
+import '../store/store_screens.dart';
 
 Future<void> _open(String url) => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
 
@@ -115,59 +115,71 @@ class _RoundButton extends StatelessWidget {
   }
 }
 
-class _ShopBody extends ConsumerWidget {
+class _ShopBody extends ConsumerStatefulWidget {
   const _ShopBody({required this.d});
   final ShopDetail d;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ShopBody> createState() => _ShopBodyState();
+}
+
+class _ShopBodyState extends ConsumerState<_ShopBody> {
+  /// 0 = the shop, 1 = its online store.
+  int _tab = 0;
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _openStore() {
+    setState(() => _tab = 1);
+    // Bring the tabs to the top so the products start right under them.
+    if (_scroll.hasClients && _scroll.offset < 200) {
+      _scroll.animateTo(200, duration: MkMotion.slow, curve: MkMotion.standard);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final d = widget.d;
     final s = ref.watch(stringsProvider);
     final t = Theme.of(context).textTheme;
     final url = ref.watch(mediaUrlProvider);
     final catInfo = ref.watch(categoriesProvider).value;
     final me = ref.watch(myLocationProvider).value;
     final c = d.card;
-    final cart = ref.watch(cartProvider);
-    final myCart = cart.shopId == c.id ? cart : null;
     final km = (me != null && c.lat != null && c.lng != null)
         ? Geolocator.distanceBetween(me.lat, me.lng, c.lat!, c.lng!) / 1000
         : c.distanceKm;
     final top = MediaQuery.paddingOf(context).top;
+    final store = d.storeEnabled;
 
     return Scaffold(
       backgroundColor: MkColors.canvas,
-      bottomNavigationBar: (myCart?.count ?? 0) > 0
-          ? SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, MkSpace.sm),
-                child: MkButton(
-                  label: s.tr(
-                    'السلة (${myCart!.count}) · ${money(myCart.totalMinor)}',
-                    'Cart (${myCart.count}) · ${money(myCart.totalMinor)}',
-                  ),
-                  icon: Icons.shopping_cart_checkout_rounded,
-                  kind: MkButtonKind.accent,
-                  onPressed: () => context.push('/cart'),
-                ),
-              ),
-            )
-          : null,
+      bottomNavigationBar: StoreCartBar(shopId: c.id),
       body: RefreshIndicator(
         edgeOffset: top,
         onRefresh: () async {
-          ref.invalidate(shopProvider(c.id));
+          ref
+            ..invalidate(shopProvider(c.id))
+            ..invalidate(shopStoreProvider(c.id));
           await ref.read(shopProvider(c.id).future);
         },
         child: CustomScrollView(
+          controller: _scroll,
           slivers: [
             SliverAppBar(
               pinned: true,
               stretch: true,
-              expandedHeight: 270,
+              expandedHeight: 250,
               backgroundColor: MkColors.purple900,
               foregroundColor: Colors.white,
               automaticallyImplyLeading: false,
               leadingWidth: 64,
+              title: Text(c.name, style: t.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
               leading: const Padding(
                 padding: EdgeInsetsDirectional.only(start: 12),
                 child: Center(child: _RoundButton(icon: Icons.arrow_back_rounded)),
@@ -175,178 +187,155 @@ class _ShopBody extends ConsumerWidget {
               actions: [
                 Padding(
                   padding: const EdgeInsetsDirectional.only(end: 12),
-                  child: _RoundButton(
-                    icon: Icons.qr_code_2_rounded,
-                    tooltip: s.myQr,
-                    onTap: () => context.go('/wallet'),
-                  ),
+                  child: _RoundButton(icon: Icons.qr_code_2_rounded, tooltip: s.myQr, onTap: () => context.go('/wallet')),
                 ),
               ],
               flexibleSpace: FlexibleSpaceBar(
                 stretchModes: const [StretchMode.zoomBackground],
                 background: _BannerHero(
-                  banners: [
-                    for (final b in d.banners) ShopBanner(url: url(b.url) ?? b.url, caption: b.caption),
-                  ],
+                  banners: [for (final b in d.banners) ShopBanner(url: url(b.url) ?? b.url, caption: b.caption)],
                   coverUrl: url(c.coverUrl),
                 ),
               ),
             ),
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    MkEntrance(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Hero(
-                            tag: 'shop-logo-${c.id}',
-                            child: Container(
-                              width: 68,
-                              height: 68,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                boxShadow: MkShadow.soft,
-                                border: Border.all(color: Colors.white, width: 3),
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: MkNetImage(url: url(c.logoUrl), fallbackName: c.name),
-                            ),
-                          ),
-                          const SizedBox(width: MkSpace.md),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, MkSpace.sm),
+                child: MkEntrance(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: MkShadow.soft, border: Border.all(color: Colors.white, width: 3)),
+                        clipBehavior: Clip.antiAlias,
+                        child: MkNetImage(url: url(c.logoUrl), fallbackName: c.name),
+                      ),
+                      const SizedBox(width: MkSpace.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(c.name, style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
-                                Text(c.name, style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-                                const SizedBox(height: 4),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 4,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  children: [
-                                    _RatingChip(rating: c.rating, count: c.ratingCount),
-                                    Text(categoryName(s, catInfo, c.category), style: t.bodySmall?.copyWith(color: MkColors.ink2)),
-                                    if (km != null)
-                                      Text('· ${_fmtKm(km)}', style: t.bodySmall?.copyWith(color: MkColors.ink2, fontWeight: FontWeight.w700)),
-                                  ],
-                                ),
-                                if (d.hours != null && d.hours!.isNotEmpty) ...[
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.schedule_rounded, size: 15, color: MkColors.ink3),
-                                      const SizedBox(width: 4),
-                                      Expanded(child: Text(d.hours!, style: t.bodySmall?.copyWith(color: MkColors.ink3))),
-                                    ],
-                                  ),
-                                ],
+                                _RatingChip(rating: c.rating, count: c.ratingCount),
+                                Text(categoryName(s, catInfo, c.category), style: t.bodySmall?.copyWith(color: MkColors.ink2)),
+                                if (km != null) Text('· ${_fmtKm(km)}', style: t.bodySmall?.copyWith(color: MkColors.ink2, fontWeight: FontWeight.w700)),
                               ],
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 6),
+                            _EarnLine(percent: c.earnText),
+                          ],
+                        ),
                       ),
-                    ),
-                    if (c.description != null && c.description!.isNotEmpty) ...[
-                      const SizedBox(height: MkSpace.sm),
-                      MkEntrance(index: 1, child: Text(c.description!, style: t.bodyMedium?.copyWith(color: MkColors.ink2))),
                     ],
-                    const SizedBox(height: MkSpace.lg),
-                    MkEntrance(index: 2, child: _PointsHero(d: d)),
-                    const SizedBox(height: MkSpace.md),
-                    MkEntrance(index: 3, child: _QuickActions(d: d)),
-                  ],
+                  ),
                 ),
               ),
             ),
-            if (d.offers.isNotEmpty)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: MkSpace.md),
-                  child: MkHorizontalSection(
-                    title: s.offers,
-                    height: 256,
-                    itemWidth: 280,
-                    itemCount: d.offers.length,
-                    itemBuilder: (context, i) => OfferTile(offer: d.offers[i]),
-                  ),
+            if (store)
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _TabsHeader(
+                  tab: _tab,
+                  top: top + kToolbarHeight,
+                  labels: (s.tr('المحل', 'Shop'), s.tr('المتجر أونلاين', 'Online store')),
+                  onTap: (i) => i == 1 ? _openStore() : setState(() => _tab = 0),
                 ),
               ),
-            if (d.rewards.isNotEmpty) ...[
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.md, MkSpace.lg, 0),
-                  child: MkSectionHeader(title: s.rewards),
-                ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: MkSpace.lg),
-                sliver: SliverList.separated(
-                  itemCount: d.rewards.length,
-                  separatorBuilder: (context, i) => const SizedBox(height: MkSpace.sm),
-                  itemBuilder: (context, i) => RewardTile(reward: d.rewards[i]),
-                ),
-              ),
-            ],
-            if (d.storeEnabled) ...[
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.md, MkSpace.lg, 0),
-                  child: MkSectionHeader(
-                    title: s.tr('المتجر', 'Shop online'),
-                    action: s.tr('افتح المتجر', 'Open store'),
-                    onAction: () => context.push('/shop/${c.id}/store'),
-                  ),
-                ),
-              ),
-              if (d.products.isNotEmpty)
+            if (store && _tab == 1) ...[
+              const SliverToBoxAdapter(child: _StoreHello()),
+              StoreCatalog(shopId: c.id),
+            ] else ...[
+              if (c.description != null && c.description!.isNotEmpty)
                 SliverToBoxAdapter(
-                  child: SizedBox(
-                    height: 236,
-                    child: ListView.separated(
-                      padding: const EdgeInsets.symmetric(horizontal: MkSpace.lg, vertical: 4),
-                      scrollDirection: Axis.horizontal,
-                      itemCount: d.products.length,
-                      separatorBuilder: (context, i) => const SizedBox(width: MkSpace.sm),
-                      itemBuilder: (context, i) {
-                        final p = d.products[i];
-                        return SizedBox(
-                          width: 156,
-                          child: MkProductCard(
-                            name: p.name,
-                            imageUrl: url(p.imageUrl),
-                            price: money(p.priceMinor),
-                            onTap: () => context.push('/shop/${c.id}/product/${p.id}'),
-                          ),
-                        );
-                      },
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
+                    child: Text(c.description!, style: t.bodyMedium?.copyWith(color: MkColors.ink2, height: 1.4)),
+                  ),
+                ),
+              if (d.hours != null && d.hours!.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, 0),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.schedule_rounded, size: 16, color: MkColors.purple700),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(d.hours!, style: t.bodySmall?.copyWith(color: MkColors.ink2, fontWeight: FontWeight.w600))),
+                      ],
                     ),
                   ),
                 ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.md, MkSpace.lg, 0),
+                  child: _QuickActions(d: d, onStore: _openStore),
+                ),
+              ),
+              if (store)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, 0),
+                    child: _StoreTeaser(d: d, onOpen: _openStore),
+                  ),
+                ),
+              if (d.offers.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: MkSpace.md),
+                    child: MkHorizontalSection(
+                      title: s.offers,
+                      height: 256,
+                      itemWidth: 280,
+                      itemCount: d.offers.length,
+                      itemBuilder: (context, i) => OfferTile(offer: d.offers[i]),
+                    ),
+                  ),
+                ),
+              if (d.rewards.isNotEmpty) ...[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.md, MkSpace.lg, 0),
+                    child: MkSectionHeader(title: s.rewards),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: MkSpace.lg),
+                  sliver: SliverList.separated(
+                    itemCount: d.rewards.length,
+                    separatorBuilder: (context, i) => const SizedBox(height: MkSpace.sm),
+                    itemBuilder: (context, i) => RewardTile(reward: d.rewards[i]),
+                  ),
+                ),
+              ],
+              if (c.lat != null && c.lng != null)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, 0),
+                    child: _FindUs(d: d, me: me, km: km),
+                  ),
+                ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, 0),
+                  child: _Reviews(d: d),
+                ),
+              ),
+              if (!d.social.isEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xl, MkSpace.lg, 0),
+                    child: _SocialIcons(social: d.social),
+                  ),
+                ),
             ],
-            if (c.lat != null && c.lng != null)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, 0),
-                  child: _FindUs(d: d, me: me, km: km),
-                ),
-              ),
-            if (!d.social.isEmpty)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, 0),
-                  child: _Socials(social: d.social, shopName: c.name),
-                ),
-              ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, 0),
-                child: _Reviews(d: d),
-              ),
-            ),
             const SliverToBoxAdapter(child: SizedBox(height: MkSpace.xxxl)),
           ],
         ),
@@ -354,6 +343,334 @@ class _ShopBody extends ConsumerWidget {
     );
   }
 }
+
+/// "10% of every bill comes back as points", one gold line under the name.
+class _EarnLine extends ConsumerWidget {
+  const _EarnLine({required this.percent});
+  final String percent;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(4, 3, 10, 3),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFFFFF4B8), MkColors.yellow50]),
+        borderRadius: MkRadius.all(MkRadius.pill),
+        border: Border.all(color: const Color(0x66E9C200)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(color: MkColors.purple900, borderRadius: MkRadius.all(MkRadius.pill)),
+            child: Text('$percent%', textDirection: TextDirection.ltr, style: t.labelMedium?.copyWith(color: MkColors.yellow500, fontWeight: FontWeight.w900)),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              s.tr('من كل فاتورة بيرجعلك نقاط', 'of every bill comes back as points'),
+              style: t.labelMedium?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pinned "Shop | Online store" switch.
+class _TabsHeader extends SliverPersistentHeaderDelegate {
+  _TabsHeader({required this.tab, required this.top, required this.labels, required this.onTap});
+  final int tab;
+  final double top;
+  final (String, String) labels;
+  final ValueChanged<int> onTap;
+
+  static const double _h = 64;
+
+  @override
+  double get minExtent => _h;
+  @override
+  double get maxExtent => _h;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final t = Theme.of(context).textTheme;
+    Widget seg(int i, String label, IconData icon) {
+      final on = tab == i;
+      return Expanded(
+        child: Semantics(
+          selected: on,
+          button: true,
+          child: GestureDetector(
+            onTap: () => onTap(i),
+            behavior: HitTestBehavior.opaque,
+            child: AnimatedContainer(
+              duration: MkMotion.base,
+              curve: MkMotion.standard,
+              margin: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: on ? MkColors.purple900 : Colors.transparent,
+                borderRadius: MkRadius.all(MkRadius.pill),
+                boxShadow: on ? const [BoxShadow(color: Color(0x442C123F), blurRadius: 12, offset: Offset(0, 4))] : null,
+              ),
+              alignment: Alignment.center,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: on ? MkColors.yellow500 : MkColors.ink2),
+                  const SizedBox(width: 6),
+                  Text(label, style: t.labelLarge?.copyWith(color: on ? Colors.white : MkColors.ink2, fontWeight: FontWeight.w800)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: MkColors.canvas,
+      padding: const EdgeInsets.fromLTRB(MkSpace.lg, 8, MkSpace.lg, 8),
+      child: Container(
+        decoration: BoxDecoration(color: Colors.white, borderRadius: MkRadius.all(MkRadius.pill), boxShadow: MkShadow.soft),
+        child: Row(children: [seg(0, labels.$1, Icons.storefront_rounded), seg(1, labels.$2, Icons.shopping_bag_rounded)]),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(_TabsHeader old) => old.tab != tab || old.labels != labels;
+}
+
+/// Big card on the shop tab that leads into the online store.
+class _StoreTeaser extends ConsumerWidget {
+  const _StoreTeaser({required this.d, required this.onOpen});
+  final ShopDetail d;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    final url = ref.watch(mediaUrlProvider);
+    final pics = d.products.where((p) => p.imageUrl != null).take(3).toList();
+    return MkPressable(
+      onTap: onOpen,
+      child: Container(
+        padding: const EdgeInsets.all(MkSpace.md),
+        decoration: BoxDecoration(
+          borderRadius: MkRadius.all(22),
+          gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFFFE97A), MkColors.yellow500, Color(0xFFE9B800)]),
+          boxShadow: const [BoxShadow(color: Color(0x55E9B800), blurRadius: 20, offset: Offset(0, 10))],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: MkColors.purple900, borderRadius: MkRadius.all(MkRadius.pill)),
+                    child: Text(s.tr('متجر أونلاين', 'Online store'), style: t.labelSmall?.copyWith(color: MkColors.yellow500, fontWeight: FontWeight.w900)),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    s.tr('اطلب من ${d.card.name}', 'Order from ${d.card.name}'),
+                    style: t.titleMedium?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    s.tr('توصيل أو استلام، والطلب بيوصل للمحل على واتساب.', 'Delivery or pickup. Your order goes to the shop on WhatsApp.'),
+                    style: t.bodySmall?.copyWith(color: MkColors.purple800),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Text(s.tr('تسوّق هلق', 'Shop now'), style: t.labelLarge?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w900)),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_forward_rounded, size: 18, color: MkColors.purple900),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: MkSpace.sm),
+            SizedBox(
+              width: 104,
+              height: 104,
+              child: pics.isEmpty
+                  ? Container(
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.5), shape: BoxShape.circle),
+                      child: const Icon(Icons.shopping_bag_rounded, size: 52, color: MkColors.purple900),
+                    )
+                  : Stack(
+                      children: [
+                        for (final (i, p) in pics.indexed)
+                          Positioned(
+                            left: i * 18.0,
+                            top: i * 14.0,
+                            child: Transform.rotate(
+                              angle: (i - 1) * 0.12,
+                              child: Container(
+                                width: 64,
+                                height: 64,
+                                clipBehavior: Clip.antiAlias,
+                                decoration: BoxDecoration(
+                                  borderRadius: MkRadius.all(16),
+                                  border: Border.all(color: Colors.white, width: 3),
+                                  boxShadow: MkShadow.soft,
+                                ),
+                                child: MkNetImage(url: url(p.imageUrl), fallbackIcon: Icons.shopping_bag_rounded),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Top of the store tab: how ordering works, in three short steps.
+class _StoreHello extends ConsumerWidget {
+  const _StoreHello();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    Widget step(IconData icon, String label) => Expanded(
+          child: Column(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: const BoxDecoration(color: MkColors.yellow500, shape: BoxShape.circle),
+                child: Icon(icon, size: 19, color: MkColors.purple900),
+              ),
+              const SizedBox(height: 4),
+              Text(label, textAlign: TextAlign.center, style: t.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(MkSpace.lg, 4, MkSpace.lg, MkSpace.xs),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [MkColors.purple700, MkColors.purple900]),
+          borderRadius: MkRadius.all(MkRadius.lg),
+        ),
+        child: Row(
+          children: [
+            step(Icons.add_shopping_cart_rounded, s.tr('اختار', 'Pick items')),
+            step(Icons.delivery_dining_rounded, s.tr('توصيل أو استلام', 'Delivery or pickup')),
+            step(Icons.chat_rounded, s.tr('ابعت على واتساب', 'Send on WhatsApp')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The shop's social accounts as icons, at the end of the page.
+class _SocialIcons extends ConsumerWidget {
+  const _SocialIcons({required this.social});
+  final ShopSocial social;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    String handle(String v) => v.replaceAll('@', '').trim();
+    String link(String v, String base) => v.startsWith('http') ? v : '$base${handle(v)}';
+    final items = <(String, Widget, Gradient, String)>[
+      if (social.instagram?.isNotEmpty ?? false)
+        (
+          'Instagram',
+          const CustomPaint(size: Size(24, 24), painter: _InstaGlyph()),
+          const LinearGradient(begin: Alignment.bottomLeft, end: Alignment.topRight, colors: [Color(0xFFFEDA75), Color(0xFFFA7E1E), Color(0xFFD62976), Color(0xFF962FBF), Color(0xFF4F5BD5)]),
+          link(social.instagram!, 'https://instagram.com/'),
+        ),
+      if (social.tiktok?.isNotEmpty ?? false)
+        ('TikTok', const Icon(Icons.tiktok, color: Colors.white, size: 24), const LinearGradient(colors: [Color(0xFF111111), Color(0xFF2B2B2B)]), link(social.tiktok!, 'https://www.tiktok.com/@')),
+      if (social.facebook?.isNotEmpty ?? false)
+        ('Facebook', const Icon(Icons.facebook, color: Colors.white, size: 26), const LinearGradient(colors: [Color(0xFF1877F2), Color(0xFF0F5FD6)]), link(social.facebook!, 'https://facebook.com/')),
+      if (social.whatsapp?.isNotEmpty ?? false)
+        ('WhatsApp', const Icon(Icons.chat_rounded, color: Colors.white, size: 23), const LinearGradient(colors: [Color(0xFF25D366), Color(0xFF128C7E)]), 'https://wa.me/${_digits(social.whatsapp!)}'),
+      if (social.website?.isNotEmpty ?? false)
+        (s.tr('الموقع', 'Website'), const Icon(Icons.language_rounded, color: Colors.white, size: 24), const LinearGradient(colors: [MkColors.purple500, MkColors.purple900]), social.website!),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(
+      children: [
+        Text(s.tr('تابعنا', 'Follow us'), style: t.labelLarge?.copyWith(color: MkColors.ink3, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+        const SizedBox(height: MkSpace.sm),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: MkSpace.md,
+          runSpacing: MkSpace.sm,
+          children: [
+            for (final (i, x) in items.indexed)
+              MkEntrance(
+                index: i,
+                child: Tooltip(
+                  message: x.$1,
+                  child: Semantics(
+                    button: true,
+                    label: x.$1,
+                    child: MkPressable(
+                      onTap: () => _open(x.$4),
+                      child: Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          gradient: x.$3,
+                          shape: BoxShape.circle,
+                          boxShadow: const [BoxShadow(color: Color(0x332C123F), blurRadius: 12, offset: Offset(0, 5))],
+                        ),
+                        child: Center(child: x.$2),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Instagram's camera glyph: rounded square, lens and flash dot.
+class _InstaGlyph extends CustomPainter {
+  const _InstaGlyph();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final p = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.09;
+    canvas
+      ..drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(w * .1, w * .1, w * .8, w * .8), Radius.circular(w * .24)), p)
+      ..drawCircle(Offset(w / 2, w / 2), w * .19, p)
+      ..drawCircle(Offset(w * .72, w * .28), w * .05, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(_InstaGlyph old) => false;
+}
+
 
 String _fmtKm(double km) => km < 1 ? '${(km * 1000).round()} m' : '${km < 10 ? km.toStringAsFixed(1) : km.round()} km';
 
@@ -492,260 +809,12 @@ class _BannerHeroState extends State<_BannerHero> {
   }
 }
 
-// ---------------------------------------------------------------- Your points + what you get back
-
-/// The most important part of the page: the member's points here, how close
-/// the next reward is, and how much of every bill comes back as points.
-class _PointsHero extends ConsumerWidget {
-  const _PointsHero({required this.d});
-  final ShopDetail d;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final s = ref.watch(stringsProvider);
-    final t = Theme.of(context).textTheme;
-    final c = d.card;
-    final sorted = [...d.rewards]..sort((a, b) => a.pointsCost.compareTo(b.pointsCost));
-    final next = sorted.where((r) => r.pointsCost > c.myPoints).firstOrNull;
-    final ready = sorted.where((r) => r.pointsCost <= c.myPoints).lastOrNull;
-    final progress = next == null ? 1.0 : (c.myPoints / next.pointsCost).clamp(0.0, 1.0);
-    // A $20 bill gives earnPercent of $20 back, at pointsPerDollar points per $1.
-    final example = (20 * c.earnPercent / 100 * c.pointsPerDollar).round();
-
-    return ClipRRect(
-      borderRadius: MkRadius.all(24),
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(0.9, -1),
-            radius: 1.6,
-            colors: [Color(0xFF6A3E99), MkColors.purple700, MkColors.purple900],
-            stops: [0, 0.4, 1],
-          ),
-        ),
-        child: MkShine(
-          period: const Duration(seconds: 6),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(s.tr('نقاطك هون', 'Your points here'), style: t.labelLarge?.copyWith(color: Colors.white70)),
-                          const SizedBox(height: 2),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
-                            children: [
-                              TweenAnimationBuilder<double>(
-                                tween: Tween(begin: 0, end: c.myPoints.toDouble()),
-                                duration: const Duration(milliseconds: 1100),
-                                curve: Curves.easeOutCubic,
-                                builder: (context, v, _) => Text(
-                                  formatPoints(v.round()),
-                                  textDirection: TextDirection.ltr,
-                                  style: t.displaySmall?.copyWith(color: MkColors.yellow500, fontWeight: FontWeight.w900, height: 1),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(s.points, style: t.titleSmall?.copyWith(color: Colors.white70)),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            s.tr('= ${money((c.myPoints * 100 / math.max(1, c.pointsPerDollar)).round())} تصرفها هون',
-                                '= ${money((c.myPoints * 100 / math.max(1, c.pointsPerDollar)).round())} to spend here'),
-                            style: t.bodySmall?.copyWith(color: Colors.white60),
-                          ),
-                        ],
-                      ),
-                    ),
-                    _ReturnMedal(percent: c.earnText, label: s.tr('بيرجعلك', 'comes back')),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                if (next != null || ready != null) ...[
-                  ClipRRect(
-                    borderRadius: MkRadius.all(MkRadius.pill),
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0, end: progress),
-                      duration: const Duration(milliseconds: 1200),
-                      curve: Curves.easeOutCubic,
-                      builder: (context, v, _) => LinearProgressIndicator(
-                        value: v,
-                        minHeight: 8,
-                        backgroundColor: Colors.white.withValues(alpha: 0.14),
-                        color: MkColors.yellow500,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(next == null ? Icons.redeem_rounded : Icons.flag_rounded, size: 16, color: MkColors.yellow200),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          next == null
-                              ? s.tr('جاهزة: ${ready!.title}', 'Ready for you: ${ready!.title}')
-                              : s.tr('ناقصك ${formatPoints(next.pointsCost - c.myPoints)} نقطة لـ ${next.title}',
-                                  '${formatPoints(next.pointsCost - c.myPoints)} more points for ${next.title}'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: t.bodySmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                Container(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.09),
-                    borderRadius: MkRadius.all(MkRadius.md),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.receipt_long_rounded, color: MkColors.yellow500, size: 22),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              s.tr('${c.earnText}% من كل فاتورة بيرجعلك نقاط', '${c.earnText}% of every bill comes back as points'),
-                              style: t.labelLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
-                            ),
-                            Text(
-                              s.tr('فاتورة \$20 = ${formatPoints(example)} نقطة', 'A \$20 bill = ${formatPoints(example)} points'),
-                              style: t.labelSmall?.copyWith(color: Colors.white70),
-                            ),
-                          ],
-                        ),
-                      ),
-                      FilledButton.icon(
-                        onPressed: () => context.go('/wallet'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: MkColors.yellow500,
-                          foregroundColor: MkColors.purple900,
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                        ),
-                        icon: const Icon(Icons.qr_code_2_rounded, size: 18),
-                        label: Text(s.tr('رمزي', 'My QR'), style: const TextStyle(fontWeight: FontWeight.w800)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Gold medal with the % that comes back, ringed by a slowly turning dotted ring.
-class _ReturnMedal extends StatefulWidget {
-  const _ReturnMedal({required this.percent, required this.label});
-  final String percent;
-  final String label;
-
-  @override
-  State<_ReturnMedal> createState() => _ReturnMedalState();
-}
-
-class _ReturnMedalState extends State<_ReturnMedal> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(seconds: 14));
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _c.stop();
-    } else if (!_c.isAnimating) {
-      _c.repeat();
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
-    return SizedBox(
-      width: 96,
-      height: 96,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          RotationTransition(turns: _c, child: const CustomPaint(size: Size(96, 96), painter: _DotRing())),
-          Container(
-            width: 78,
-            height: 78,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFFFF0A0), MkColors.yellow500, Color(0xFFE0B000)],
-              ),
-              boxShadow: [BoxShadow(color: Color(0x66FBD404), blurRadius: 18)],
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  '${widget.percent}%',
-                  textDirection: TextDirection.ltr,
-                  style: t.titleLarge?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w900, height: 1),
-                ),
-                Text(widget.label, style: t.labelSmall?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w700, fontSize: 10)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DotRing extends CustomPainter {
-  const _DotRing();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = size.center(Offset.zero);
-    final r = size.width / 2 - 2;
-    final p = Paint()..color = const Color(0xCCFBD404);
-    for (var i = 0; i < 24; i++) {
-      final a = i / 24 * math.pi * 2;
-      canvas.drawCircle(c + Offset(math.cos(a), math.sin(a)) * r, i.isEven ? 2 : 1.2, p);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DotRing old) => false;
-}
-
 // ---------------------------------------------------------------- Quick actions
 
 class _QuickActions extends ConsumerWidget {
-  const _QuickActions({required this.d});
+  const _QuickActions({required this.d, required this.onStore});
   final ShopDetail d;
+  final VoidCallback onStore;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -763,7 +832,7 @@ class _QuickActions extends ConsumerWidget {
         ),
       if (phone != null && phone.isNotEmpty) (Icons.call_rounded, s.tr('اتصل', 'Call'), MkColors.purple700, () => _open('tel:${_digits(phone)}')),
       if (wa != null && wa.isNotEmpty) (Icons.chat_rounded, 'WhatsApp', const Color(0xFF1FAF55), () => _open('https://wa.me/${_digits(wa)}')),
-      if (d.storeEnabled) (Icons.storefront_rounded, s.tr('المتجر', 'Store'), const Color(0xFFB86E00), () => context.push('/shop/${c.id}/store')),
+      if (d.storeEnabled) (Icons.shopping_bag_rounded, s.tr('المتجر', 'Store'), const Color(0xFFB86E00), onStore),
     ];
     if (items.isEmpty) return const SizedBox.shrink();
     final t = Theme.of(context).textTheme;
@@ -930,83 +999,6 @@ class _YouDot extends StatelessWidget {
       );
 }
 
-// ---------------------------------------------------------------- Social links
-
-class _Socials extends ConsumerWidget {
-  const _Socials({required this.social, required this.shopName});
-  final ShopSocial social;
-  final String shopName;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final s = ref.watch(stringsProvider);
-    final t = Theme.of(context).textTheme;
-    String handle(String v) => v.replaceAll('@', '').trim();
-    String link(String v, String base) => v.startsWith('http') ? v : '$base${handle(v)}';
-    final items = <(String, IconData, Gradient, String)>[
-      if (social.instagram?.isNotEmpty ?? false)
-        (
-          'Instagram',
-          Icons.camera_alt_rounded,
-          const LinearGradient(begin: Alignment.bottomLeft, end: Alignment.topRight, colors: [Color(0xFFFEDA75), Color(0xFFFA7E1E), Color(0xFFD62976), Color(0xFF962FBF), Color(0xFF4F5BD5)]),
-          link(social.instagram!, 'https://instagram.com/'),
-        ),
-      if (social.facebook?.isNotEmpty ?? false)
-        ('Facebook', Icons.facebook, const LinearGradient(colors: [Color(0xFF1877F2), Color(0xFF1877F2)]), link(social.facebook!, 'https://facebook.com/')),
-      if (social.tiktok?.isNotEmpty ?? false)
-        ('TikTok', Icons.music_note_rounded, const LinearGradient(colors: [Color(0xFF111111), Color(0xFF2B2B2B)]), link(social.tiktok!, 'https://www.tiktok.com/@')),
-      if (social.whatsapp?.isNotEmpty ?? false)
-        ('WhatsApp', Icons.chat_rounded, const LinearGradient(colors: [Color(0xFF25D366), Color(0xFF128C7E)]), 'https://wa.me/${_digits(social.whatsapp!)}'),
-      if (social.website?.isNotEmpty ?? false)
-        (s.tr('الموقع', 'Website'), Icons.language_rounded, const LinearGradient(colors: [MkColors.purple500, MkColors.purple900]), social.website!),
-      if (social.phone?.isNotEmpty ?? false)
-        (s.tr('اتصل', 'Call'), Icons.call_rounded, const LinearGradient(colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)]), 'tel:${_digits(social.phone!)}'),
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        MkSectionHeader(title: s.tr('تابع $shopName', 'Follow $shopName')),
-        Wrap(
-          spacing: MkSpace.md,
-          runSpacing: MkSpace.sm,
-          children: [
-            for (final (i, x) in items.indexed)
-              MkEntrance(
-                index: i,
-                child: Semantics(
-                  button: true,
-                  label: x.$1,
-                  child: MkPressable(
-                    onTap: () => _open(x.$4),
-                    child: SizedBox(
-                      width: 64,
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 54,
-                            height: 54,
-                            decoration: BoxDecoration(
-                              gradient: x.$3,
-                              borderRadius: MkRadius.all(18),
-                              boxShadow: const [BoxShadow(color: Color(0x262C123F), blurRadius: 12, offset: Offset(0, 5))],
-                            ),
-                            child: Icon(x.$2, color: Colors.white, size: 26),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(x.$1, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.labelSmall?.copyWith(fontWeight: FontWeight.w700)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
 // ---------------------------------------------------------------- Reviews
 
 class _Reviews extends ConsumerStatefulWidget {
@@ -1102,6 +1094,20 @@ class _ReviewsState extends ConsumerState<_Reviews> {
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            const Icon(Icons.verified_rounded, size: 15, color: MkColors.success),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                s.tr('تقييم واحد لكل شخص بعد زيارة حقيقية. إذا غيّرت النجوم، بينحسب نفس التقييم.',
+                    'One review per person, after a real visit. Changing your stars updates the same review.'),
+                style: t.labelSmall?.copyWith(color: MkColors.ink3),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: MkSpace.sm),
         if (d.reviews.isEmpty)

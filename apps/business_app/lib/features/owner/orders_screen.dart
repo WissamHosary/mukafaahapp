@@ -124,6 +124,38 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen> {
                                   ],
                                 ),
                               ),
+                            if (o['contactPhone'] != null || o['customerPhone'] != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Icon(Icons.call_rounded, size: 16, color: MkColors.purple700),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        [
+                                          if (o['contactName'] != null) '${o['contactName']}',
+                                          if (o['contactPhone'] != null) '${o['contactPhone']}',
+                                          if (o['customerPhone'] != null) s.tr('موثّق: ${o['customerPhone']}', 'Verified: ${o['customerPhone']}'),
+                                        ].join(' · '),
+                                        style: t.bodySmall,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (o['mapUrl'] != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.map_rounded, size: 16, color: MkColors.purple700),
+                                    const SizedBox(width: 4),
+                                    Expanded(child: SelectableText('${o['mapUrl']}', style: t.bodySmall?.copyWith(color: MkColors.purple700))),
+                                  ],
+                                ),
+                              ),
                             const Divider(height: MkSpace.lg),
                             for (final it in ((o['items'] as List?) ?? const []).cast<Map<dynamic, dynamic>>())
                               Padding(

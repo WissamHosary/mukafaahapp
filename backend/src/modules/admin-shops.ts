@@ -67,7 +67,7 @@ export class AdminShopsController {
   ) {
     this.merchant = new MerchantController(db);
     this.owner = new OwnerController(db, crypto, ledger);
-    this.store = new StoreOwnerController(db);
+    this.store = new StoreOwnerController(db, crypto);
   }
 
   /** Acts as the owner of shop [id] (after checking the shop exists). */

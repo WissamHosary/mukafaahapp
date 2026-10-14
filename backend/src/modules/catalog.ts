@@ -373,7 +373,12 @@ export class CatalogController {
         [bid],
       ),
     ]);
-    const visited = await this.db.one(`SELECT 1 FROM visits WHERE business_id = $1 AND user_id = $2 LIMIT 1`, [bid, a.userId]);
+    // One review per member, after a real visit or a completed order (no fake reviews).
+    const visited = await this.db.one(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM visits WHERE business_id = $1 AND user_id = $2)
+          OR EXISTS (SELECT 1 FROM whatsapp_orders WHERE business_id = $1 AND user_id = $2 AND status = 'COMPLETED')`,
+      [bid, a.userId],
+    );
     const openBooking = new Map(bookings.rows.map((x) => [x.offer_id, x.status]));
     return {
       ...card,
@@ -413,7 +418,11 @@ export class CatalogController {
   async rate(@Auth() a: UserAuth, @Param('id') id: string, @Body() body: unknown) {
     const bid = parse(zUuid, id);
     const b = parse(zRating, body);
-    const visited = await this.db.one(`SELECT 1 FROM visits WHERE business_id = $1 AND user_id = $2 LIMIT 1`, [bid, a.userId]);
+    const visited = await this.db.one(
+      `SELECT 1 WHERE EXISTS (SELECT 1 FROM visits WHERE business_id = $1 AND user_id = $2)
+          OR EXISTS (SELECT 1 FROM whatsapp_orders WHERE business_id = $1 AND user_id = $2 AND status = 'COMPLETED')`,
+      [bid, a.userId],
+    );
     if (!visited) throw new AppError(403, 'RATE_AFTER_VISIT', 'You can rate a shop after your first visit');
     await this.db.tx(async (c) => {
       await c.query(

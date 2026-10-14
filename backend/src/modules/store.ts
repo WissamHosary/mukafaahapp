@@ -3,10 +3,11 @@ import { randomInt } from 'node:crypto';
 import { z } from 'zod';
 import { audit } from '../platform/audit.js';
 import { Auth, ClientIp, RequireOwner, RequireUser, type OwnerAuth, type UserAuth } from '../platform/auth.js';
+import { CryptoService } from '../platform/crypto.js';
 import { Db, type Tx } from '../platform/db.js';
 import { AppError, Errors } from '../platform/errors.js';
 import { parse, zUuid } from '../platform/validation.js';
-import { alertBusiness, mediaUrl, notify } from './shared.js';
+import { alertBusiness, mediaUrl, notify, prettyPhone } from './shared.js';
 
 /*
  * Optional online store for each shop. Catalog, variants and cart only:
@@ -68,15 +69,42 @@ const zCategoryPatch = z.strictObject({
   active: z.boolean().optional(),
 });
 const zOrderStatus = z.strictObject({ status: z.enum(['CONFIRMED', 'READY', 'COMPLETED', 'CANCELLED']) });
+/** One line of plain text: no line breaks or control characters, so nobody can rewrite the WhatsApp message. */
+const zLine = (min: number, max: number) =>
+  z
+    .string()
+    .transform((v) => v.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim())
+    .pipe(z.string().min(min).max(max));
 const zOrder = z.strictObject({
   items: z
     .array(z.strictObject({ productId: zUuid, variantId: zUuid.optional(), qty: z.number().int().min(1).max(99) }))
     .min(1)
     .max(50),
   fulfilment: z.enum(['PICKUP', 'DELIVERY']).default('PICKUP'),
-  address: z.string().trim().max(300).optional(),
-  note: z.string().trim().max(300).optional(),
+  /** Older apps send one address line. */
+  address: zLine(0, 300).optional(),
+  note: zLine(0, 300).optional(),
+  contact: z
+    .strictObject({
+      name: zLine(2, 60),
+      phone: z.string().trim().regex(/^\+?[0-9 ]{7,20}$/),
+    })
+    .optional(),
+  delivery: z
+    .strictObject({
+      area: zLine(2, 80),
+      street: zLine(2, 120),
+      building: zLine(0, 80).optional(),
+      landmark: zLine(0, 120).optional(),
+      lat: z.number().min(-90).max(90).optional(),
+      lng: z.number().min(-180).max(180).optional(),
+    })
+    .optional(),
 });
+/** Limits that stop fake or spam orders. */
+const ORDER_MAX_OPEN_PER_SHOP = 3;
+const ORDER_MAX_PER_DAY = 10;
+const ORDER_MAX_TOTAL_MINOR = 500_000;
 
 type Option = z.infer<typeof zOption>;
 type VariantIn = z.infer<typeof zVariant>;
@@ -198,7 +226,10 @@ async function saveVariants(c: Tx, productId: string, variants: VariantIn[]) {
 @Controller('v1/business/manage/store')
 @RequireOwner()
 export class StoreOwnerController {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly crypto: CryptoService,
+  ) {}
 
   private async ownMedia(ids: (string | null | undefined)[], businessId: string) {
     const list = [...new Set(ids.filter((x): x is string => !!x))];
@@ -375,7 +406,7 @@ export class StoreOwnerController {
   @Get('orders')
   async orders(@Auth() a: OwnerAuth) {
     const r = await this.db.query(
-      `SELECT w.*, u.name, u.phone_last4 FROM whatsapp_orders w JOIN users u ON u.id = w.user_id
+      `SELECT w.*, u.name, u.phone_last4, u.phone_enc FROM whatsapp_orders w JOIN users u ON u.id = w.user_id
         WHERE w.business_id = $1 ORDER BY (w.status = 'NEW') DESC, w.created_at DESC LIMIT 200`,
       [a.businessId],
     );
@@ -390,6 +421,11 @@ export class StoreOwnerController {
       note: x.note ?? null,
       createdAt: x.created_at,
       customer: x.name ?? `•••• ${x.phone_last4}`,
+      // Who to call and where to go.
+      contactName: x.contact_name ?? null,
+      contactPhone: x.contact_phone ?? null,
+      customerPhone: x.phone_enc ? prettyPhone(this.crypto.decrypt(x.phone_enc)) : null,
+      mapUrl: x.lat != null && x.lng != null ? `https://maps.google.com/?q=${Number(x.lat).toFixed(6)},${Number(x.lng).toFixed(6)}` : null,
     }));
   }
 
@@ -445,7 +481,10 @@ export class StoreOwnerController {
 @Controller('v1/customer/shops')
 @RequireUser()
 export class StoreCustomerController {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly crypto: CryptoService,
+  ) {}
 
   private async openStore(shopId: string) {
     const b = await this.db.one(
@@ -496,7 +535,19 @@ export class StoreCustomerController {
     const b = parse(zOrder, body);
     const biz = await this.openStore(bid);
     if (!biz.whatsapp) throw new AppError(409, 'NO_WHATSAPP', 'This shop has no WhatsApp number yet');
-    if (b.fulfilment === 'DELIVERY' && !b.address) throw Errors.validation({ address: ['REQUIRED'] });
+    if (b.fulfilment === 'DELIVERY' && !b.address && !b.delivery) throw Errors.validation({ address: ['REQUIRED'] });
+    if (b.fulfilment === 'DELIVERY' && b.delivery && !b.contact) throw Errors.validation({ contact: ['REQUIRED'] });
+    // Spam guard: a few open orders per shop and a daily cap per member.
+    const recent = await this.db.one(
+      `SELECT count(*) FILTER (WHERE business_id = $2 AND status = 'NEW')::int AS open,
+              count(*) FILTER (WHERE created_at > now() - interval '1 day')::int AS day
+         FROM whatsapp_orders WHERE user_id = $1 AND created_at > now() - interval '7 days'`,
+      [a.userId, bid],
+    );
+    if ((recent?.open ?? 0) >= ORDER_MAX_OPEN_PER_SHOP) {
+      throw new AppError(429, 'ORDER_OPEN_LIMIT', 'You already have orders waiting at this shop. Wait for them to be confirmed.');
+    }
+    if ((recent?.day ?? 0) >= ORDER_MAX_PER_DAY) throw Errors.tooMany('ORDER_DAY_LIMIT');
 
     const pids = [...new Set(b.items.map((i) => i.productId))];
     const vids = [...new Set(b.items.map((i) => i.variantId).filter((x): x is string => !!x))];
@@ -528,8 +579,14 @@ export class StoreCustomerController {
       lines.push({ productId: p.id, variantId: hasOptions ? (it.variantId ?? null) : null, name: p.name, variant, qty: it.qty, priceMinor: price });
       total += price * it.qty;
     }
+    if (total > ORDER_MAX_TOTAL_MINOR) throw new AppError(409, 'ORDER_TOO_LARGE', `Orders above ${money(ORDER_MAX_TOTAL_MINOR)} are arranged with the shop directly`);
+    const d = b.fulfilment === 'DELIVERY' ? b.delivery : undefined;
+    const address = d ? [d.area, d.street, d.building, d.landmark].filter(Boolean).join(', ') : b.fulfilment === 'DELIVERY' ? (b.address ?? null) : null;
+    const mapUrl = d?.lat != null && d?.lng != null ? `https://maps.google.com/?q=${d.lat.toFixed(6)},${d.lng.toFixed(6)}` : null;
 
-    const user = await this.db.one(`SELECT name, phone_last4, locale FROM users WHERE id = $1`, [a.userId]);
+    const user = await this.db.one(`SELECT name, phone_last4, phone_enc, locale FROM users WHERE id = $1`, [a.userId]);
+    // The member's own number, checked with a WhatsApp code when they joined.
+    const verified = user?.phone_enc ? prettyPhone(this.crypto.decrypt(user.phone_enc)) : null;
     const ar = user?.locale !== 'en';
     const code = orderCode();
     const text = [
@@ -539,23 +596,30 @@ export class StoreCustomerController {
       ...lines.map((l) => `• ${l.qty} × ${l.name}${l.variant ? ` (${l.variant})` : ''} — ${money(l.priceMinor * l.qty)}`),
       '',
       `${ar ? 'المجموع' : 'Total'}: ${money(total)}`,
-      b.fulfilment === 'DELIVERY'
-        ? `${ar ? 'توصيل إلى' : 'Deliver to'}: ${b.address}`
-        : ar
-          ? 'استلام من المحل'
-          : 'Pickup from the shop',
+      b.fulfilment === 'DELIVERY' ? (ar ? 'توصيل' : 'Delivery') : ar ? 'استلام من المحل' : 'Pickup from the shop',
+      ...(b.fulfilment === 'DELIVERY' && address ? [`${ar ? 'العنوان' : 'Address'}: ${address}`] : []),
+      ...(mapUrl ? [`${ar ? 'الموقع' : 'Location'}: ${mapUrl}`] : []),
       ...(b.note ? [`${ar ? 'ملاحظة' : 'Note'}: ${b.note}`] : []),
       '',
-      `${ar ? 'الاسم' : 'Name'}: ${user?.name ?? ''} (•••• ${user?.phone_last4 ?? ''})`,
-      ar ? 'الدفع عند الاستلام. ما في دفع أونلاين.' : 'Pay on delivery or pickup. No online payment.',
+      `${ar ? 'الاسم' : 'Name'}: ${b.contact?.name ?? user?.name ?? ''}`,
+      ...(b.contact?.phone ? [`${ar ? 'رقم التواصل' : 'Contact phone'}: ${b.contact.phone}`] : []),
+      `${ar ? 'رقم مكافأة (موثّق)' : 'Mukafaah number (verified)'}: ${verified ?? `•••• ${user?.phone_last4 ?? ''}`}`,
+      '',
+      ar ? `تأكد من الطلب #${code} بتطبيق مكافأة للأعمال قبل التحضير.` : `Check order #${code} in Mukafaah Business before preparing it.`,
+      ar ? 'الدفع عند الاستلام. ما في دفع مسبق.' : 'Pay on delivery or pickup. No payment in advance.',
     ].join('\n');
 
     const r = await this.db.tx(async (c) => {
       const row = (
         await c.query(
-          `INSERT INTO whatsapp_orders(business_id, user_id, items, total_minor, note, code, fulfilment, address)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-          [bid, a.userId, JSON.stringify(lines), total, b.note ?? null, code, b.fulfilment, b.fulfilment === 'DELIVERY' ? b.address : null],
+          `INSERT INTO whatsapp_orders(business_id, user_id, items, total_minor, note, code, fulfilment, address,
+                                       contact_name, contact_phone, area, street, building, landmark, lat, lng)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+          [
+            bid, a.userId, JSON.stringify(lines), total, b.note ?? null, code, b.fulfilment, address,
+            b.contact?.name ?? null, b.contact?.phone ?? null, d?.area ?? null, d?.street ?? null, d?.building ?? null,
+            d?.landmark ?? null, d?.lat ?? null, d?.lng ?? null,
+          ],
         )
       ).rows[0];
       const who = user?.name || `•••• ${user?.phone_last4 ?? ''}`;

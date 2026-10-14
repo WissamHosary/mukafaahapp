@@ -1431,7 +1431,10 @@ class CustomerApi {
     required bool delivery,
     String? address,
     String? note,
+    ({String name, String phone})? contact,
+    ({String area, String street, String? building, String? landmark, double? lat, double? lng})? place,
   }) async {
+    String? opt(String? v) => v == null || v.trim().isEmpty ? null : v.trim();
     final d = await client.post<Json>(
       '/v1/customer/shops/$shopId/order',
       data: {
@@ -1439,8 +1442,17 @@ class CustomerApi {
           for (final it in items) {'productId': it.productId, if (it.variantId != null) 'variantId': it.variantId, 'qty': it.qty},
         ],
         'fulfilment': delivery ? 'DELIVERY' : 'PICKUP',
-        if (delivery && address != null && address.trim().isNotEmpty) 'address': address.trim(),
-        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+        if (delivery && opt(address) != null) 'address': opt(address),
+        if (opt(note) != null) 'note': opt(note),
+        if (contact != null) 'contact': {'name': contact.name.trim(), 'phone': contact.phone.trim()},
+        if (delivery && place != null)
+          'delivery': {
+            'area': place.area.trim(),
+            'street': place.street.trim(),
+            if (opt(place.building) != null) 'building': opt(place.building),
+            if (opt(place.landmark) != null) 'landmark': opt(place.landmark),
+            if (place.lat != null && place.lng != null) ...{'lat': place.lat, 'lng': place.lng},
+          },
       },
     );
     return (url: d['whatsappUrl'] as String, totalMinor: _i(d['totalMinor']), code: (d['code'] ?? '') as String);

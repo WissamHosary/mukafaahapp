@@ -1322,9 +1322,9 @@
     const list = await api('GET', `${base(shop)}/orders`);
     const NEXT = { NEW: ['CONFIRMED', 'Confirm'], CONFIRMED: ['READY', 'Mark ready'], READY: ['COMPLETED', 'Complete'] };
     ws.innerHTML = `<div class="card flush"><div class="card-h"><h3>Store orders</h3><span class="sp"></span><span class="muted">Confirming takes the stock; the customer gets a notification.</span></div><div class="tw nomax"><table class="tbl"><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th class="r">Total</th><th>How</th><th>Status</th><th></th></tr></thead><tbody>
-      ${list.map((o) => `<tr data-id="${esc(o.id)}"><td><b>#${esc(o.code || '—')}</b><div class="muted">${esc(when(o.createdAt))}</div></td><td>${esc(o.customer)}</td>
+      ${list.map((o) => `<tr data-id="${esc(o.id)}"><td><b>#${esc(o.code || '—')}</b><div class="muted">${esc(when(o.createdAt))}</div></td><td><b>${esc(o.contactName || o.customer)}</b>${o.contactPhone ? `<div class="mono">${esc(o.contactPhone)}</div>` : ''}${o.customerPhone ? `<div class="muted" title="Checked with a WhatsApp code">Verified ${esc(o.customerPhone)}</div>` : ''}</td>
         <td class="muted">${(o.items || []).map((it) => `${it.qty}× ${esc(it.name)}${it.variant ? ` (${esc(it.variant)})` : ''}`).join('<br>')}</td><td class="r num">${usd(o.totalMinor)}</td>
-        <td class="muted">${o.fulfilment === 'DELIVERY' ? `Delivery<br>${esc(o.address || '')}` : 'Pickup'}</td><td>${pill(o.status)}</td>
+        <td class="muted wrap">${o.fulfilment === 'DELIVERY' ? `<b>Delivery</b><br>${esc(o.address || '')}${o.mapUrl ? `<br><a href="${esc(o.mapUrl)}" target="_blank" rel="noopener">${ic('pin', 'xs')} Location</a>` : ''}` : 'Pickup'}</td><td>${pill(o.status)}</td>
         <td><div class="acts">${NEXT[o.status] ? `<button class="btn sm" data-st="${NEXT[o.status][0]}">${NEXT[o.status][1]}</button><button class="btn danger sm" data-st="CANCELLED">Cancel</button>` : ''}</div></td></tr>`).join('') || `<tr><td colspan="7">${empty('box', 'No orders yet', 'Orders from the customer app show up here and in the Business app.')}</td></tr>`}
       </tbody></table></div></div>`;
     ws.querySelector('tbody').addEventListener('click', async (e) => {
