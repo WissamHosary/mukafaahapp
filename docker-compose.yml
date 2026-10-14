@@ -37,6 +37,9 @@ services:
       # Phones that are always Mukafaah Manager owners (comma separated, e.g. 70123456).
       # Leave empty in development: the first person to sign in at /admin becomes the owner.
       ADMIN_PHONES: ""
+      # Google sign-in: the Web client ID from Google Cloud (same value the app
+      # is built with as GOOGLE_SERVER_CLIENT_ID). Empty = Google sign-in is off.
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-}
     ports:
       # Reachable from phones on the same Wi-Fi for testing.
       - "3000:3000"

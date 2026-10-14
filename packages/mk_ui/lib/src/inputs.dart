@@ -33,7 +33,7 @@ class MkPhoneField extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('🇱🇧', style: TextStyle(fontSize: 20)),
+                const _LebanonFlag(),
                 const SizedBox(width: 8),
                 Text('+961', style: t.titleMedium),
                 const SizedBox(width: 8),
@@ -41,6 +41,38 @@ class MkPhoneField extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The Lebanese flag, drawn (red, white, red, with a green cedar).
+class _LebanonFlag extends StatelessWidget {
+  const _LebanonFlag();
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(
+        width: 24,
+        height: 16,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            const Column(
+              children: [
+                Expanded(child: ColoredBox(color: Color(0xFFE62E2E), child: SizedBox.expand())),
+                Expanded(flex: 2, child: ColoredBox(color: Colors.white, child: SizedBox.expand())),
+                Expanded(child: ColoredBox(color: Color(0xFFE62E2E), child: SizedBox.expand())),
+              ],
+            ),
+            Transform.rotate(
+              angle: 0.785,
+              child: Container(width: 6, height: 6, decoration: BoxDecoration(color: const Color(0xFF1C8C3B), borderRadius: BorderRadius.circular(1))),
+            ),
+          ],
         ),
       ),
     );

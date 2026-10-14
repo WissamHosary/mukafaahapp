@@ -342,8 +342,8 @@ export class MerchantController {
           k.user_id,
           'BOOKING_ACCEPTED',
           {
-            ar: { title: 'انقبل حجزك ✅', body: `${info.name}: ${info.title}. رمز الحجز ${k.code}` },
-            en: { title: 'Booking accepted ✅', body: `${info.name}: ${info.title}. Booking code ${k.code}` },
+            ar: { title: 'انقبل حجزك', body: `${info.name}: ${info.title}. رمز الحجز ${k.code}` },
+            en: { title: 'Booking accepted', body: `${info.name}: ${info.title}. Booking code ${k.code}` },
           },
           { bookingId: k.id },
         );

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/providers.dart';
 import 'app/router.dart';
+import 'features/lock/lock_gate.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -34,7 +35,8 @@ class MukafaahApp extends ConsumerWidget {
       supportedLocales: const [Locale('ar'), Locale('en')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       // Brand intro plays once over the app while it starts up.
-      builder: (context, child) => MaterialUiCompatibilityBridge(child: MkIntroGate(child: child!)),
+      // Fingerprint / Face ID lock (when turned on) sits under the intro.
+      builder: (context, child) => MaterialUiCompatibilityBridge(child: MkIntroGate(child: AppLockGate(child: child!))),
     );
   }
 }

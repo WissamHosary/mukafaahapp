@@ -413,8 +413,8 @@ export class CashierController {
       if (userId) {
         const bn = (await c.query(`SELECT name FROM businesses WHERE id = $1`, [a.businessId])).rows[0]?.name ?? '';
         await notify(c, userId, 'EARN', {
-          ar: { title: `ربحت ${fmtPts(pts)} نقطة ✨`, body: `من ${bn}` },
-          en: { title: `You earned ${fmtPts(pts)} points ✨`, body: `At ${bn}` },
+          ar: { title: `ربحت ${fmtPts(pts)} نقطة`, body: `من ${bn}` },
+          en: { title: `You earned ${fmtPts(pts)} points`, body: `At ${bn}` },
         }, { transactionId: txId });
         // Mukafaah Points for the first bill anywhere, and the tier by total spend.
         await grantRule(c, this.ledger, 'FIRST_BILL', userId);

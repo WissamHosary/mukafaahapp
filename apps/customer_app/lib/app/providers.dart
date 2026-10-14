@@ -3,6 +3,7 @@ import 'package:mk_core/mk_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/api.dart';
+import '../features/auth/google_auth.dart';
 
 /// Overridden in main() after SharedPreferences loads.
 final prefsProvider = Provider<SharedPreferences>((ref) => throw UnimplementedError());
@@ -83,6 +84,10 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> logout({bool all = false}) async {
     await ref.read(apiProvider).logout(all: all);
+    // The next person to sign in on this phone chooses for themselves.
+    await ref.read(prefsProvider).remove('bio.enabled');
+    await ref.read(prefsProvider).remove('bio.asked');
+    await GoogleAuth.signOut();
     signedOut();
   }
 }

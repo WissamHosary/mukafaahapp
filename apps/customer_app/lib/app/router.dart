@@ -50,6 +50,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       final path = state.matchedLocation;
       if (s == AuthStatus.unknown) return path == '/splash' ? null : '/splash';
       if (s == AuthStatus.signedOut) return publicPaths.contains(path) ? null : '/welcome';
+      // New members finish their profile before anything else.
+      final user = ref.read(authProvider).user;
+      if (user != null && user.needsProfile && !path.startsWith('/signup')) {
+        return ref.read(authProvider).next ?? (user.isGoogle ? '/signup/name' : '/signup/profile');
+      }
       if (path == '/splash' || publicPaths.contains(path)) return ref.read(authProvider).next ?? '/home';
       return null;
     },
@@ -61,7 +66,19 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/otp',
         pageBuilder: (c, s) => _fade(s, OtpScreen(args: s.extra! as OtpArgs)),
       ),
-      GoRoute(path: '/name', pageBuilder: (c, s) => _fade(s, const NameScreen())),
+      GoRoute(path: '/signup/profile', pageBuilder: (c, s) => _fade(s, const ProfileSetupScreen())),
+      GoRoute(
+        path: '/signup/name',
+        pageBuilder: (c, s) => _fade(s, CallMeScreen(suggested: s.uri.queryParameters['suggest'])),
+      ),
+      GoRoute(
+        path: '/signup/done',
+        pageBuilder: (c, s) => _fade(s, SignupDoneScreen(invitedBy: s.uri.queryParameters['invitedBy'])),
+      ),
+      GoRoute(
+        path: '/signup/unlock',
+        pageBuilder: (c, s) => _fade(s, UnlockOfferScreen(next: s.uri.queryParameters['next'] ?? '/home')),
+      ),
       GoRoute(path: '/collect', pageBuilder: (c, s) => _fade(s, const CollectScreen())),
       GoRoute(path: '/shop/:id', pageBuilder: (c, s) => _fade(s, ShopScreen(id: s.pathParameters['id']!))),
       GoRoute(path: '/shop/:id/store', pageBuilder: (c, s) => _fade(s, StoreScreen(shopId: s.pathParameters['id']!))),

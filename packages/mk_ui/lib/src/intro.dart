@@ -31,6 +31,10 @@ class MkIntroGate extends StatefulWidget {
   /// False skips the intro entirely (tests, deep links).
   final bool enabled;
 
+  /// True while the intro covers the screen, so things like the fingerprint
+  /// prompt can wait until it is gone.
+  static final ValueNotifier<bool> playing = ValueNotifier<bool>(false);
+
   @override
   State<MkIntroGate> createState() => _MkIntroGateState();
 }
@@ -63,6 +67,7 @@ class _MkIntroGateState extends State<MkIntroGate> with SingleTickerProviderStat
     super.didChangeDependencies();
     if (_started || _done) return;
     _started = true;
+    MkIntroGate.playing.value = true;
     _reduced = MediaQuery.disableAnimationsOf(context);
     if (_reduced) {
       _timer = Timer(const Duration(milliseconds: 600), _finish);
@@ -72,6 +77,7 @@ class _MkIntroGateState extends State<MkIntroGate> with SingleTickerProviderStat
   }
 
   void _finish() {
+    MkIntroGate.playing.value = false;
     if (mounted && !_done) setState(() => _done = true);
   }
 

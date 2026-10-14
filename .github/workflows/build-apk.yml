@@ -8,14 +8,17 @@ name: Build APKs
 # Set it once in Settings > Secrets and variables > Actions > Variables as API_URL,
 # or type it when you press "Run workflow".
 
+# Runs only when started by hand (Actions > Build APKs > Run workflow), so
+# work in progress does not produce new APKs.
 on:
-  push:
-    branches: [main]
-    paths: ['apps/**', 'packages/**', 'tools/platform/**', 'tools/ci/**', '.github/workflows/build-apk.yml']
   workflow_dispatch:
     inputs:
       api_url:
         description: 'Server address the apps use (your PC on Wi-Fi)'
+        required: false
+        default: ''
+      google_client_id:
+        description: 'Google sign-in Web client ID (leave empty to keep Google sign-in off)'
         required: false
         default: ''
 
@@ -32,6 +35,7 @@ jobs:
     timeout-minutes: 60
     env:
       API_URL: ${{ inputs.api_url || vars.API_URL || 'http://192.168.1.5:3000' }}
+      GOOGLE_ID: ${{ inputs.google_client_id || vars.GOOGLE_SERVER_CLIENT_ID || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,7 +62,7 @@ jobs:
         run: |
           [ -d android ] || flutter create --org app.mukafaah --project-name mukafaah_customer --platforms=android --no-pub .
           rm -f test/widget_test.dart
-          python3 ../../tools/ci/patch_android.py . "Mukafaah" 0 1
+          python3 ../../tools/ci/patch_android.py . "Mukafaah" 0 1 1
           cp -r ../../tools/platform/customer/android/. android/ 2>/dev/null || true
           flutter pub get
 
@@ -73,7 +77,7 @@ jobs:
 
       - name: Build Customer APK
         working-directory: apps/customer_app
-        run: flutter build apk --release --dart-define=ENV=dev --dart-define=API_URL=$API_URL
+        run: flutter build apk --release --dart-define=ENV=dev --dart-define=API_URL=$API_URL --dart-define=GOOGLE_SERVER_CLIENT_ID=$GOOGLE_ID
 
       - name: Build Business APK
         working-directory: apps/business_app

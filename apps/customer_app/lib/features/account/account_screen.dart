@@ -7,7 +7,9 @@ import 'package:mk_ui/mk_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/providers.dart';
+import '../auth/auth_screens.dart';
 import '../common/common.dart';
+import '../lock/biometric.dart';
 
 /// Profile & Settings: tier, name, referral code, invites, language, bookings,
 /// join as merchant, support and sign-out.
@@ -159,7 +161,11 @@ class AccountScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(user?.name ?? '', style: t.titleLarge),
-                      Text('+961 ${maskPhone(user?.phoneLast4)}', textDirection: TextDirection.ltr, style: t.bodySmall?.copyWith(color: MkColors.ink3)),
+                      Text(
+                        user?.phoneLast4 == null ? (user?.email ?? '') : '+961 ${maskPhone(user?.phoneLast4)}',
+                        textDirection: TextDirection.ltr,
+                        style: t.bodySmall?.copyWith(color: MkColors.ink3),
+                      ),
                       if (referral != null)
                         GestureDetector(
                           onTap: () async {
@@ -316,15 +322,41 @@ class AccountScreen extends ConsumerWidget {
             padding: EdgeInsets.zero,
             child: Column(
               children: [
+                const _QuickUnlockTile(),
                 tile(Icons.logout_rounded, s.logout, () => _logout(ref)),
                 tile(Icons.devices_rounded, s.logoutAll, () => _logout(ref, all: true), color: MkColors.danger),
               ],
             ),
           ),
           const SizedBox(height: MkSpace.xxl),
-          Center(child: Text('${s.appName} · v0.2 · ${AppConfig.env}', style: t.bodySmall?.copyWith(color: MkColors.ink3))),
+          Center(child: Text('${s.appName} · v0.8 · ${AppConfig.env}', style: t.bodySmall?.copyWith(color: MkColors.ink3))),
         ],
       ),
+    );
+  }
+}
+
+/// "Unlock with fingerprint / Face ID" switch. Hidden on phones without either.
+class _QuickUnlockTile extends ConsumerWidget {
+  const _QuickUnlockTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final kind = ref.watch(bioKindProvider).value ?? BioKind.none;
+    if (kind == BioKind.none) return const SizedBox.shrink();
+    final on = ref.watch(bioEnabledProvider);
+    final face = kind == BioKind.face;
+    return SwitchListTile(
+      secondary: Icon(face ? Icons.face : Icons.fingerprint, color: MkColors.purple700),
+      title: Text(face ? s.tr('افتح بـ Face ID', 'Unlock with Face ID') : s.tr('افتح بالبصمة', 'Unlock with fingerprint')),
+      subtitle: Text(
+        on ? s.tr('بينطلب كل ما تفتح التطبيق.', 'Asked every time you open the app.') : s.tr('مطفي', 'Off'),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: MkColors.ink3),
+      ),
+      value: on,
+      activeTrackColor: MkColors.success,
+      onChanged: (v) => toggleQuickUnlock(context, ref, v),
     );
   }
 }

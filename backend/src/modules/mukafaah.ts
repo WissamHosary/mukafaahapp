@@ -92,8 +92,8 @@ export async function grantRule(c: Tx, ledger: LedgerService, code: RuleCode, us
       userId,
       'MUKAFAAH',
       {
-        ar: { title: `حصلت على ${fmtPts(points)} نقطة مكافأة 🎁`, body: rule.title_ar },
-        en: { title: `You got ${fmtPts(points)} Mukafaah Points 🎁`, body: rule.title_en },
+        ar: { title: `حصلت على ${fmtPts(points)} نقطة مكافأة`, body: rule.title_ar },
+        en: { title: `You got ${fmtPts(points)} Mukafaah Points`, body: rule.title_en },
       },
       { transactionId: txId, rule: code },
     );
@@ -137,8 +137,8 @@ export async function addSpend(c: Tx, ledger: LedgerService, userId: string, del
     userId,
     'TIER_UP',
     {
-      ar: { title: `وصلت للمستوى ${target.nameAr} 🎉`, body: bonus ? `هدية ${fmtPts(bonus)} نقطة مكافأة` : undefined },
-      en: { title: `You reached ${target.nameEn} 🎉`, body: bonus ? `Bonus: ${fmtPts(bonus)} Mukafaah Points` : undefined },
+      ar: { title: `وصلت للمستوى ${target.nameAr}`, body: bonus ? `هدية ${fmtPts(bonus)} نقطة مكافأة` : undefined },
+      en: { title: `You reached ${target.nameEn}`, body: bonus ? `Bonus: ${fmtPts(bonus)} Mukafaah Points` : undefined },
     },
     { tier: target.code },
   );
@@ -326,8 +326,8 @@ export class AdminMukafaahController {
           u.id,
           'MUKAFAAH',
           {
-            ar: { title: `حصلت على ${fmtPts(b.points)} نقطة مكافأة 🎁`, body: b.reason },
-            en: { title: `You got ${fmtPts(b.points)} Mukafaah Points 🎁`, body: b.reason },
+            ar: { title: `حصلت على ${fmtPts(b.points)} نقطة مكافأة`, body: b.reason },
+            en: { title: `You got ${fmtPts(b.points)} Mukafaah Points`, body: b.reason },
           },
           { transactionId: txId },
         );

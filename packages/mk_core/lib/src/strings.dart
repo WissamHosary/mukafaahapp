@@ -82,7 +82,7 @@ class S {
       };
 
   // ---------- Customer ----------
-  String hello(String? name) => name == null || name.isEmpty ? tr('أهلا 👋', 'Hello 👋') : tr('أهلا $name 👋', 'Hello $name 👋');
+  String hello(String? name) => name == null || name.isEmpty ? tr('أهلا', 'Hello') : tr('أهلا $name', 'Hello $name');
   String get totalBalance => tr('رصيدك الكلي', 'Your total balance');
   String get home => tr('الرئيسية', 'Home');
   String get wallet => tr('المحفظة', 'Wallet');
@@ -99,7 +99,7 @@ class S {
   String get qrTitle => tr('اعرض هالرمز للكاشير', 'Show this to the cashier');
   String qrRefresh(int s) => tr('بيتجدد بعد $s ث', 'Refreshes in ${s}s');
   String get qrHint => tr('الرمز بيتغير كل شوي لحمايتك. ما حدا بيقدر يستعمل لقطة شاشة.', 'The code changes often to protect you. Screenshots won’t work.');
-  String get prePointsTitle => tr('عندك نقاط ناطرتك! 🎁', 'Points are waiting for you! 🎁');
+  String get prePointsTitle => tr('عندك نقاط ناطرتك!', 'Points are waiting for you!');
   String prePointsBody(int p) => tr('جمعت $p نقطة قبل ما تنزّل التطبيق. اضغط جمع لتصير بمحفظتك.', 'You earned $p points before joining. Tap Collect to add them to your wallet.');
   String get collect => tr('جمع النقاط', 'Collect');
   String collected(int p) => tr('انضافوا $p نقطة لمحفظتك', '$p points added to your wallet');

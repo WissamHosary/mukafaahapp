@@ -18,6 +18,10 @@ dependencies:
   flutter_map: ^8.3.2
   latlong2: ^0.9.1
   geolocator: ^13.0.2
+  # Official Flutter team plugins (flutter.dev): Google sign-in and
+  # fingerprint / Face ID unlock.
+  google_sign_in: ^7.1.0
+  local_auth: ^2.3.0
   mk_core:
     path: ../../packages/mk_core
   mk_ui:

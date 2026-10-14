@@ -3,12 +3,44 @@ import 'package:mk_core/mk_core.dart';
 // ---------- Models (immutable, parsed from server JSON) ----------
 
 class AppUser {
-  const AppUser({required this.id, this.name, this.phoneLast4});
-  factory AppUser.fromJson(Map<String, dynamic> j) =>
-      AppUser(id: j['id'] as String, name: j['name'] as String?, phoneLast4: j['phoneLast4'] as String?);
+  const AppUser({
+    required this.id,
+    this.name,
+    this.phoneLast4,
+    this.email,
+    this.gender,
+    this.age,
+    this.signInMethod = 'PHONE',
+    this.needsProfile = false,
+  });
+  factory AppUser.fromJson(Map<String, dynamic> j, {bool? needsProfile}) => AppUser(
+        id: j['id'] as String,
+        name: j['name'] as String?,
+        phoneLast4: j['phoneLast4'] as String?,
+        email: j['email'] as String?,
+        gender: j['gender'] as String?,
+        age: (j['age'] as num?)?.toInt(),
+        signInMethod: j['signInMethod'] as String? ?? (j['email'] != null && j['phoneLast4'] == null ? 'GOOGLE' : 'PHONE'),
+        needsProfile: needsProfile ?? j['needsProfile'] as bool? ?? false,
+      );
   final String id;
   final String? name;
   final String? phoneLast4;
+
+  /// The Gmail address for members who joined with Google.
+  final String? email;
+
+  /// MALE or FEMALE.
+  final String? gender;
+  final int? age;
+
+  /// PHONE or GOOGLE.
+  final String signInMethod;
+
+  /// True until the member finishes the sign-up profile.
+  final bool needsProfile;
+
+  bool get isGoogle => signInMethod == 'GOOGLE';
 }
 
 class OtpChallenge {
@@ -1009,7 +1041,54 @@ class CustomerApi {
       data: {'challengeId': challengeId, 'code': code, 'app': 'CUSTOMER', 'deviceLabel': 'Mukafaah app'},
     );
     await client.store.saveTokens(access: d['accessToken'] as String, refresh: d['refreshToken'] as String);
-    return (user: AppUser.fromJson(d['user'] as Map<String, dynamic>), isNew: d['isNew'] as bool);
+    return (
+      user: AppUser.fromJson(d['user'] as Map<String, dynamic>, needsProfile: d['needsProfile'] as bool? ?? false),
+      isNew: d['isNew'] as bool,
+    );
+  }
+
+  /// Signs in with the ID token Google gave the app. The server checks it with Google.
+  Future<({AppUser user, bool isNew, String? suggestedName})> signInWithGoogle(String idToken, String locale) async {
+    final d = await client.post<Map<String, dynamic>>(
+      '/v1/auth/google',
+      auth: false,
+      data: {'idToken': idToken, 'app': 'CUSTOMER', 'deviceLabel': 'Mukafaah app', 'locale': locale},
+    );
+    await client.store.saveTokens(access: d['accessToken'] as String, refresh: d['refreshToken'] as String);
+    final u = Map<String, dynamic>.from(d['user'] as Map)..['signInMethod'] = 'GOOGLE';
+    return (
+      user: AppUser.fromJson(u, needsProfile: d['needsProfile'] as bool? ?? false),
+      isNew: d['isNew'] as bool,
+      suggestedName: d['suggestedName'] as String?,
+    );
+  }
+
+  /// Finishes sign-up: name (always), age and gender (phone members), and an
+  /// optional invite code. Saved together or not at all.
+  Future<AppUser> completeProfile({
+    required String name,
+    int? age,
+    String? gender,
+    String? referralCode,
+    String? locale,
+  }) async =>
+      AppUser.fromJson(
+        await client.post<Map<String, dynamic>>(
+          '/v1/customer/profile',
+          data: {
+            'name': name,
+            if (age != null) 'age': age,
+            if (gender != null) 'gender': gender,
+            if (referralCode != null && referralCode.isNotEmpty) 'referralCode': referralCode,
+            if (locale != null) 'locale': locale,
+          },
+        ),
+      );
+
+  /// Checks an invite code while it is typed (does not use it).
+  Future<({bool valid, String? referrer})> checkReferral(String code) async {
+    final d = await client.get<Map<String, dynamic>>('/v1/customer/referral/check', query: {'code': code});
+    return (valid: d['valid'] as bool? ?? false, referrer: d['referrer'] as String?);
   }
 
   Future<AppUser> me() async => AppUser.fromJson(await client.get<Map<String, dynamic>>('/v1/customer/me'));

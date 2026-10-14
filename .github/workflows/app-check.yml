@@ -1,0 +1,33 @@
+name: App check
+
+# Checks that both apps compile (flutter analyze) on every change. It does not
+# build APKs; that is "Build APKs", started by hand.
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/**', 'packages/**', '.github/workflows/app-check.yml']
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Packages
+        run: |
+          (cd packages/mk_core && flutter pub get)
+          (cd packages/mk_ui && flutter pub get)
+          (cd apps/customer_app && flutter pub get)
+          (cd apps/business_app && flutter pub get)
+      - name: Analyze customer app
+        working-directory: apps/customer_app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Analyze business app
+        working-directory: apps/business_app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings

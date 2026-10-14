@@ -426,8 +426,8 @@ export class StoreOwnerController {
       await c.query(`UPDATE whatsapp_orders SET status = $2, stock_taken = $3, updated_at = now() WHERE id = $1`, [oid, b.status, stockTaken]);
       const biz = (await c.query(`SELECT name FROM businesses WHERE id = $1`, [a.businessId])).rows[0];
       const label: Record<string, [string, string]> = {
-        CONFIRMED: ['Order confirmed ✅', 'تم تأكيد طلبك ✅'],
-        READY: ['Order ready 🛍️', 'طلبك جاهز 🛍️'],
+        CONFIRMED: ['Order confirmed', 'تم تأكيد طلبك'],
+        READY: ['Order ready', 'طلبك جاهز'],
         COMPLETED: ['Order completed', 'تم تسليم الطلب'],
         CANCELLED: ['Order cancelled', 'تم إلغاء الطلب'],
       };
@@ -533,7 +533,7 @@ export class StoreCustomerController {
     const ar = user?.locale !== 'en';
     const code = orderCode();
     const text = [
-      ar ? `🛍️ طلب جديد من مكافأة #${code}` : `🛍️ New Mukafaah order #${code}`,
+      ar ? `طلب جديد من مكافأة #${code}` : `New Mukafaah order #${code}`,
       biz.name,
       '',
       ...lines.map((l) => `• ${l.qty} × ${l.name}${l.variant ? ` (${l.variant})` : ''} — ${money(l.priceMinor * l.qty)}`),

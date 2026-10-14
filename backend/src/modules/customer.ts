@@ -4,7 +4,9 @@ import { audit } from '../platform/audit.js';
 import { Auth, IdemKey, RequireUser, type UserAuth } from '../platform/auth.js';
 import { CryptoService } from '../platform/crypto.js';
 import { Db } from '../platform/db.js';
+import { AppError } from '../platform/errors.js';
 import { parse } from '../platform/validation.js';
+import { applyReferral } from './engage.js';
 import { LedgerService } from './ledger.js';
 import { mukafaahBalance } from './mukafaah.js';
 import { MEMBER_QR_PREFIX, memberCode } from './shared.js';
@@ -14,6 +16,13 @@ export const QR_PREFIX = 'MKF1:';
 
 const zProfile = z.strictObject({
   name: z.string().trim().min(1).max(60).optional(),
+  locale: z.enum(['ar', 'en']).optional(),
+});
+const zComplete = z.strictObject({
+  name: z.string().trim().min(2).max(60),
+  age: z.number().int().min(13).max(100).optional(),
+  gender: z.enum(['MALE', 'FEMALE']).optional(),
+  referralCode: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{5,10}$/).optional(),
   locale: z.enum(['ar', 'en']).optional(),
 });
 const zPage = z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) });
@@ -29,9 +38,57 @@ export class CustomerController {
 
   @Get('me')
   async me(@Auth() auth: UserAuth) {
-    const u = await this.db.one(`SELECT id, name, locale, phone_last4, created_at FROM users WHERE id = $1`, [auth.userId]);
-    const owns = await this.db.one(`SELECT id, name FROM businesses WHERE owner_user_id = $1`, [auth.userId]);
-    return { id: u.id, name: u.name, locale: u.locale, phoneLast4: u.phone_last4, business: owns ?? null };
+    return this.profile(auth.userId);
+  }
+
+  private async profile(userId: string) {
+    const u = await this.db.one(
+      `SELECT id, name, locale, phone_last4, email, gender, birth_year, google_sub IS NOT NULL AS google,
+              profile_completed_at, created_at
+         FROM users WHERE id = $1`,
+      [userId],
+    );
+    const owns = await this.db.one(`SELECT id, name FROM businesses WHERE owner_user_id = $1`, [userId]);
+    return {
+      id: u.id,
+      name: u.name,
+      locale: u.locale,
+      phoneLast4: u.phone_last4 ?? null,
+      email: u.email ?? null,
+      gender: u.gender ?? null,
+      age: u.birth_year ? new Date().getFullYear() - u.birth_year : null,
+      signInMethod: u.google ? 'GOOGLE' : 'PHONE',
+      needsProfile: !u.profile_completed_at,
+      business: owns ?? null,
+    };
+  }
+
+  /**
+   * Finishes signing up. Phone members give their name, age and gender;
+   * Google members only what to be called. An optional invite code links the
+   * friend who invited them. All of it is saved together or not at all.
+   */
+  @Post('profile')
+  @HttpCode(200)
+  async completeProfile(@Auth() auth: UserAuth, @Body() body: unknown) {
+    const b = parse(zComplete, body);
+    await this.db.tx(async (c) => {
+      const u = (await c.query(`SELECT * FROM users WHERE id = $1 FOR UPDATE`, [auth.userId])).rows[0];
+      if (u.profile_completed_at) throw new AppError(409, 'PROFILE_DONE', 'Your profile is already set up');
+      const byPhone = !u.google_sub;
+      if (byPhone && (b.age == null || !b.gender)) {
+        throw new AppError(400, 'PROFILE_INCOMPLETE', 'Age and gender are needed');
+      }
+      await c.query(
+        `UPDATE users SET name = $2, birth_year = COALESCE($3, birth_year), gender = COALESCE($4, gender),
+                locale = COALESCE($5, locale), profile_completed_at = now(), updated_at = now()
+          WHERE id = $1`,
+        [auth.userId, b.name, b.age == null ? null : new Date().getFullYear() - b.age, b.gender ?? null, b.locale ?? null],
+      );
+      if (b.referralCode) await applyReferral(c, this.ledger, auth.userId, b.referralCode);
+      await audit(c, { actorType: 'USER', actorId: auth.userId, action: 'profile.complete', data: { referral: !!b.referralCode } });
+    });
+    return this.profile(auth.userId);
   }
 
   @Patch('me')

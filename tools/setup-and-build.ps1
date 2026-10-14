@@ -116,12 +116,33 @@ function Patch-Android($appDir, $label, [bool]$camera, [bool]$location = $false)
       $loc = '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>' + "`r`n" + '    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>' + "`r`n"
       $m = $m -replace '(<manifest[^>]*>)', ('$1' + "`r`n" + $loc)
     }
+    if ($location -and $m -notmatch 'USE_BIOMETRIC') {
+      # v0.8: fingerprint unlock in the customer app.
+      $m = $m -replace '(<manifest[^>]*>)', ('$1' + "`r`n" + '    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>' + "`r`n")
+    }
     $m = $m -replace 'android:label="[^"]*"', ('android:label="' + $label + '"')
     if ($m -notmatch 'usesCleartextTraffic') {
       # Development builds talk to the local API over http. Production uses HTTPS only.
       $m = $m -replace '<application', '<application android:usesCleartextTraffic="true"'
     }
     [System.IO.File]::WriteAllText($manifest, $m, (New-Object System.Text.UTF8Encoding($false)))
+  }
+  if ($location) {
+    # Fingerprint unlock (local_auth) needs a FlutterFragmentActivity.
+    Get-ChildItem -Recurse -ErrorAction SilentlyContinue (Join-Path $appDir 'android\app\src\main') -Include 'MainActivity.kt', 'MainActivity.java' | ForEach-Object {
+      $a = (Get-Content $_.FullName -Raw)
+      $a = $a -replace 'io\.flutter\.embedding\.android\.FlutterActivity\b', 'io.flutter.embedding.android.FlutterFragmentActivity'
+      $a = $a -replace '\bFlutterActivity\(\)', 'FlutterFragmentActivity()'
+      $a = $a -replace 'extends FlutterActivity\b', 'extends FlutterFragmentActivity'
+      [System.IO.File]::WriteAllText($_.FullName, $a, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    # iPhone: Face ID needs a reason shown to the user.
+    $plist = Join-Path $appDir 'ios\Runner\Info.plist'
+    if ((Test-Path $plist) -and -not ((Get-Content $plist -Raw) -match 'NSFaceIDUsageDescription')) {
+      # Only the first (top-level) <dict>.
+      $p = ([regex]'<dict>').Replace((Get-Content $plist -Raw), "<dict>`n`t<key>NSFaceIDUsageDescription</key>`n`t<string>Unlock your Mukafaah wallet with Face ID.</string>", 1)
+      [System.IO.File]::WriteAllText($plist, $p, (New-Object System.Text.UTF8Encoding($false)))
+    }
   }
   foreach ($g in @('android\app\build.gradle.kts', 'android\app\build.gradle')) {
     $gp = Join-Path $appDir $g

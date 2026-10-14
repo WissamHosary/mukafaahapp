@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { audit } from '../platform/audit.js';
 import { Auth, IdemKey, RequireUser, type UserAuth } from '../platform/auth.js';
 import { CryptoService } from '../platform/crypto.js';
-import { Db, pgCode } from '../platform/db.js';
+import { Db, pgCode, type Tx } from '../platform/db.js';
 import { AppError, Errors } from '../platform/errors.js';
 import { parse, zPoints, zUuid } from '../platform/validation.js';
 import { LedgerService } from './ledger.js';
@@ -38,7 +38,7 @@ const zTransfer = z.strictObject({
   points: zPoints,
   note: z.string().trim().max(120).optional(),
 });
-const zReferral = z.strictObject({ code: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{5,10}$/) });
+export const zReferral = z.strictObject({ code: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{5,10}$/) });
 
 type TransferRules = { minPoints: number; dailyMaxPoints: number; dailyMaxCount: number; minTier: string };
 const TRANSFER_DEFAULTS: TransferRules = { minPoints: 10, dailyMaxPoints: 20000, dailyMaxCount: 10, minTier: 'GOLD' };
@@ -60,6 +60,39 @@ const BENEFITS: Record<string, { ar: string; en: string }[]> = {
     { ar: 'دعوات لفعاليات خاصة', en: 'Invitations to special events' },
   ],
 };
+
+/** "Lara Haddad" becomes "Lara H." (what other members are shown). */
+export function shortName(name: string | null) {
+  if (!name) return null;
+  const parts = name.trim().split(/\s+/);
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0];
+}
+
+/**
+ * Links a member to the friend who invited them and gives that friend their
+ * Mukafaah Points. Used from sign-up and from the Invite screen. Returns the
+ * friend's short name.
+ */
+export async function applyReferral(c: Tx, ledger: LedgerService, userId: string, rawCode: string): Promise<string | null> {
+  const code = rawCode.trim().toUpperCase();
+  const me = (await c.query(`SELECT * FROM users WHERE id = $1 FOR UPDATE`, [userId])).rows[0];
+  if (me.referred_by) throw new AppError(409, 'REFERRAL_USED', 'You already used an invite code');
+  const windowDays = Number((await getSetting<{ windowDays?: number }>(c, 'referral', {})).windowDays ?? 14);
+  if (Date.now() - new Date(me.created_at).getTime() > windowDays * 86_400_000) {
+    throw new AppError(409, 'REFERRAL_EXPIRED', 'Invite codes can only be used in your first 14 days');
+  }
+  const ref = (await c.query(`SELECT id, name FROM users WHERE referral_code = $1 AND status = 'ACTIVE'`, [code])).rows[0];
+  if (!ref || ref.id === userId) throw new AppError(404, 'REFERRAL_NOT_FOUND', 'This invite code does not exist');
+  await c.query(`UPDATE users SET referred_by = $2, referred_at = now() WHERE id = $1`, [userId, ref.id]);
+  // Mukafaah Points for the friend who invited (once per invited member).
+  await grantRule(c, ledger, 'REFERRAL', ref.id, userId);
+  const who = shortName(me.name) ?? '';
+  await notify(c, ref.id, 'REFERRAL', {
+    ar: { title: 'صاحبك انضم لمكافأة', body: `${who} استعمل رمز الدعوة تبعك` },
+    en: { title: 'Your friend joined Mukafaah', body: `${who} used your invite code` },
+  });
+  return shortName(ref.name);
+}
 
 @Controller('v1/customer')
 @RequireUser()
@@ -297,9 +330,7 @@ export class EngageController {
   }
 
   private static shortName(name: string | null) {
-    if (!name) return null;
-    const parts = name.trim().split(/\s+/);
-    return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0]}.` : parts[0];
+    return shortName(name);
   }
 
   /** Shows who will receive the points before sending (first name and last initial only). */
@@ -364,8 +395,8 @@ export class EngageController {
       const who = EngageController.shortName(me?.name ?? null) ?? '';
       const shop = prog.business_name ?? prog.name;
       await notify(c, to.id, 'TRANSFER_IN', {
-        ar: { title: `وصلك ${fmtPts(b.points)} نقطة 🎉`, body: `${who} بعتلك نقاط ${shop}${b.note ? `: ${b.note}` : ''}` },
-        en: { title: `You received ${fmtPts(b.points)} points 🎉`, body: `${who} sent you ${shop} points${b.note ? `: ${b.note}` : ''}` },
+        ar: { title: `وصلك ${fmtPts(b.points)} نقطة`, body: `${who} بعتلك نقاط ${shop}${b.note ? `: ${b.note}` : ''}` },
+        en: { title: `You received ${fmtPts(b.points)} points`, body: `${who} sent you ${shop} points${b.note ? `: ${b.note}` : ''}` },
       });
       await audit(c, { actorType: 'USER', actorId: a.userId, action: 'points.transfer', entityId: txId, data: { points: b.points, to: to.id } });
       const bal = (await c.query(`SELECT balance FROM account_balances WHERE account_id = $1`, [from])).rows[0];
@@ -397,25 +428,17 @@ export class EngageController {
   @HttpCode(200)
   async useReferral(@Auth() a: UserAuth, @Body() body: unknown) {
     const b = parse(zReferral, body);
-    return this.db.tx(async (c) => {
-      const me = (await c.query(`SELECT * FROM users WHERE id = $1 FOR UPDATE`, [a.userId])).rows[0];
-      if (me.referred_by) throw new AppError(409, 'REFERRAL_USED', 'You already used an invite code');
-      const windowDays = Number((await getSetting<{ windowDays?: number }>(c, 'referral', {})).windowDays ?? 14);
-      if (Date.now() - new Date(me.created_at).getTime() > windowDays * 86_400_000) {
-        throw new AppError(409, 'REFERRAL_EXPIRED', 'Invite codes can only be used in your first 14 days');
-      }
-      const ref = (await c.query(`SELECT id, name FROM users WHERE referral_code = $1 AND status = 'ACTIVE'`, [b.code])).rows[0];
-      if (!ref || ref.id === a.userId) throw new AppError(404, 'REFERRAL_NOT_FOUND', 'This invite code does not exist');
-      await c.query(`UPDATE users SET referred_by = $2, referred_at = now() WHERE id = $1`, [a.userId, ref.id]);
-      // Mukafaah Points for the friend who invited (once per invited member).
-      await grantRule(c, this.ledger, 'REFERRAL', ref.id, a.userId);
-      const who = EngageController.shortName(me.name) ?? '';
-      await notify(c, ref.id, 'REFERRAL', {
-        ar: { title: 'صاحبك انضم لمكافأة 🎉', body: `${who} استعمل رمز الدعوة تبعك` },
-        en: { title: 'Your friend joined Mukafaah 🎉', body: `${who} used your invite code` },
-      });
-      return { ok: true, referredBy: EngageController.shortName(ref.name) };
-    });
+    return this.db.tx(async (c) => ({ ok: true, referredBy: await applyReferral(c, this.ledger, a.userId, b.code) }));
+  }
+
+  /** Checks an invite code while the member types it at sign-up (does not use it). */
+  @Get('referral/check')
+  async checkReferral(@Auth() a: UserAuth, @Query() q: unknown) {
+    const parsed = zReferral.safeParse({ code: (q as { code?: unknown } | null)?.code });
+    if (!parsed.success) return { valid: false, referrer: null };
+    const ref = await this.db.one(`SELECT id, name FROM users WHERE referral_code = $1 AND status = 'ACTIVE'`, [parsed.data.code]);
+    if (!ref || ref.id === a.userId) return { valid: false, referrer: null };
+    return { valid: true, referrer: shortName(ref.name) };
   }
 
   // ---------- Notifications ----------

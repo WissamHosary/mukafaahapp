@@ -7,6 +7,7 @@ import { Auth, ClientIp, RequireUser, type UserAuth } from '../platform/auth.js'
 import { CryptoService } from '../platform/crypto.js';
 import { Db, type Tx } from '../platform/db.js';
 import { AppError, Errors } from '../platform/errors.js';
+import { verifyGoogleIdToken } from '../platform/google.js';
 import { parse } from '../platform/validation.js';
 import { LedgerService } from './ledger.js';
 import { grantRule } from './mukafaah.js';
@@ -36,6 +37,17 @@ const zVerify = z.strictObject({
   deviceLabel: z.string().max(80).optional(),
 });
 const zRefresh = z.strictObject({ refreshToken: z.string().min(20).max(200) });
+const zGoogle = z.strictObject({
+  idToken: z.string().min(20).max(4096),
+  app: z.literal('CUSTOMER'),
+  deviceLabel: z.string().max(80).optional(),
+  locale: z.enum(['ar', 'en']).default('ar'),
+});
+
+/** What the apps need to know about the member right after signing in. */
+function signedInUser(u: Record<string, any>) {
+  return { id: u.id, name: u.name, phoneLast4: u.phone_last4 ?? null, email: u.email ?? null };
+}
 
 @Controller('v1/auth')
 export class AuthController {
@@ -135,7 +147,7 @@ export class AuthController {
       if (isNew) await grantRule(c, this.ledger, 'SIGNUP', user.id);
       // Phones listed in ADMIN_PHONES become Mukafaah Manager admins on first sign-in.
       const adminPhones = config.ADMIN_PHONES.split(',').map((x) => x.trim()).filter(Boolean);
-      if (adminPhones.length) {
+      if (adminPhones.length && user.phone_enc) {
         const phone = this.crypto.decrypt(user.phone_enc);
         const listed = adminPhones.some((x) => {
           try {
@@ -159,10 +171,48 @@ export class AuthController {
       }
       const tokens = await this.createSession(c, user.id, b.app, b.deviceLabel ?? null, null);
       await audit(c, { actorType: 'USER', actorId: user.id, action: 'auth.login', data: { app: b.app }, ip });
-      return { ...tokens, isNew, user: { id: user.id, name: user.name, phoneLast4: user.phone_last4 } };
+      return { ...tokens, isNew, needsProfile: !user.profile_completed_at, user: signedInUser(user) };
     });
     if (!out) throw new AppError(400, 'OTP_INVALID', 'Code is wrong or expired');
     return out;
+  }
+
+  /**
+   * Sign in with Google. The app gets an ID token from Google (Google shows
+   * its own account picker) and sends it here; we verify it with Google's keys.
+   * New members then only choose what to be called.
+   */
+  @Post('google')
+  @HttpCode(200)
+  async google(@Body() body: unknown, @ClientIp() ip: string) {
+    const b = parse(zGoogle, body);
+    const g = await verifyGoogleIdToken(b.idToken);
+    return this.db.tx(async (c) => {
+      let user = (await c.query(`SELECT * FROM users WHERE google_sub = $1 FOR UPDATE`, [g.sub])).rows[0];
+      let isNew = false;
+      if (!user) {
+        user = (
+          await c.query(`INSERT INTO users(google_sub, email, locale) VALUES ($1, $2, $3) RETURNING *`, [g.sub, g.email, b.locale])
+        ).rows[0];
+        isNew = true;
+        // Mukafaah Points for joining (once per user).
+        await grantRule(c, this.ledger, 'SIGNUP', user.id);
+      } else if (user.email !== g.email) {
+        await c.query(`UPDATE users SET email = $2, updated_at = now() WHERE id = $1`, [user.id, g.email]);
+        user.email = g.email;
+      }
+      if (user.status !== 'ACTIVE') throw Errors.forbidden();
+      const tokens = await this.createSession(c, user.id, b.app, b.deviceLabel ?? null, null);
+      await audit(c, { actorType: 'USER', actorId: user.id, action: 'auth.login', data: { app: b.app, method: 'GOOGLE' }, ip });
+      return {
+        ...tokens,
+        isNew,
+        needsProfile: !user.profile_completed_at,
+        // Prefilled in "What should we call you?".
+        suggestedName: g.givenName ?? g.name,
+        user: signedInUser(user),
+      };
+    });
   }
 
   @Post('refresh')

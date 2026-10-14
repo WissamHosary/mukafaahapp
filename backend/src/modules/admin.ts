@@ -562,7 +562,7 @@ export class AdminController {
   async customers(@Query() q: unknown) {
     const f = parse(zQ, q);
     const r = await this.db.query(
-      `SELECT u.id, u.name, u.phone_last4, u.created_at, u.referral_code, u.tier, u.lifetime_spend_minor,
+      `SELECT u.id, u.name, u.phone_last4, u.email, u.created_at, u.referral_code, u.tier, u.lifetime_spend_minor,
               COALESCE((SELECT SUM(ab.balance) FROM ledger_accounts a JOIN account_balances ab ON ab.account_id = a.id
                          JOIN programs p ON p.id = a.program_id
                          WHERE a.owner_type = 'CUSTOMER' AND a.owner_id = u.id AND p.type <> 'PLATFORM'), 0) AS balance,
@@ -578,7 +578,8 @@ export class AdminController {
     return r.rows.map((u) => ({
       id: u.id,
       name: u.name,
-      phone: `•••• ${u.phone_last4}`,
+      // Google members may have no phone: show their masked Gmail instead.
+      phone: u.phone_last4 ? `•••• ${u.phone_last4}` : u.email ? u.email.replace(/^(.).*(@.*)$/, '$1•••$2') : '',
       referralCode: u.referral_code,
       balance: Number(u.balance),
       mukafaahPoints: Number(u.mukafaah),

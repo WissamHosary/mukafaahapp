@@ -18,6 +18,9 @@ const schema = z.object({
   CORS_ORIGINS: z.string().default(''),
   // Phones that become Mukafaah Manager admins when they sign in (comma separated).
   ADMIN_PHONES: z.string().default(''),
+  // OAuth client IDs whose Google sign-in tokens are accepted (comma separated):
+  // the Web client ID used as serverClientId in the app, plus any others.
+  GOOGLE_CLIENT_IDS: z.string().default(''),
   // Only trust X-Forwarded-For when running behind our own load balancer.
   TRUST_PROXY: z
     .string()

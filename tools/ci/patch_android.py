@@ -1,12 +1,13 @@
 """Same Android fixes as Patch-Android in setup-and-build.ps1, for the GitHub build.
 
-Usage: python3 patch_android.py <appDir> <label> <camera 0|1> <location 0|1>
+Usage: python3 patch_android.py <appDir> <label> <camera 0|1> <location 0|1> [biometric 0|1]
 """
 import pathlib
 import re
 import sys
 
 app, label, camera, location = sys.argv[1], sys.argv[2], sys.argv[3] == '1', sys.argv[4] == '1'
+biometric = len(sys.argv) > 5 and sys.argv[5] == '1'
 root = pathlib.Path(app)
 
 manifest = root / 'android/app/src/main/AndroidManifest.xml'
@@ -16,6 +17,8 @@ if camera:
     perms.append('android.permission.CAMERA')
 if location:
     perms += ['android.permission.ACCESS_FINE_LOCATION', 'android.permission.ACCESS_COARSE_LOCATION']
+if biometric:
+    perms.append('android.permission.USE_BIOMETRIC')
 add = ''.join(f'    <uses-permission android:name="{p}"/>\n' for p in perms if p not in m)
 if add:
     m = re.sub(r'(<manifest[^>]*>)', lambda g: g.group(1) + '\n' + add, m, count=1)
@@ -32,4 +35,13 @@ for name in ('build.gradle.kts', 'build.gradle'):
         c = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 24', c)
         c = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 24', c)
         g.write_text(c, encoding='utf-8')
+if biometric:
+    # Fingerprint unlock (local_auth) needs a FlutterFragmentActivity.
+    for act in root.glob('android/app/src/main/**/MainActivity.*'):
+        a = act.read_text(encoding='utf-8')
+        a = a.replace('io.flutter.embedding.android.FlutterActivity', 'io.flutter.embedding.android.FlutterFragmentActivity')
+        a = re.sub(r'\bFlutterActivity\(\)', 'FlutterFragmentActivity()', a)
+        a = re.sub(r'extends FlutterActivity\b', 'extends FlutterFragmentActivity', a)
+        act.write_text(a, encoding='utf-8')
+
 print(f'patched {app}: {", ".join(perms)}')

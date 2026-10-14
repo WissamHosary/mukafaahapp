@@ -193,8 +193,8 @@ export class RedeemService {
     }
     if (!recorded) throw new AppError(500, 'BOOKING_CODE');
     await notify(c, ctx.userId, 'OFFER_USED', {
-      ar: { title: 'استعملت العرض 🎁', body: o.title },
-      en: { title: 'Offer used 🎁', body: o.title },
+      ar: { title: 'استعملت العرض', body: o.title },
+      en: { title: 'Offer used', body: o.title },
     });
     await audit(c, { actorType: 'STAFF', actorId: ctx.staffId, businessId: ctx.businessId, action: 'offer.apply', entityId: offerId, data: { requestId: ctx.requestId } });
     return { ok: true, title: o.title as string, pointsSpent: cost, newBalance, transactionId: txId };
@@ -216,8 +216,8 @@ export class RedeemService {
     );
     if (w.stock !== null) await c.query(`UPDATE rewards SET stock = stock - 1, updated_at = now() WHERE id = $1`, [rewardId]);
     await notify(c, ctx.userId, 'REWARD', {
-      ar: { title: 'استلمت مكافأتك 🎉', body: `${w.title} مقابل ${fmtPts(cost)} نقطة` },
-      en: { title: 'Reward redeemed 🎉', body: `${w.title} for ${fmtPts(cost)} points` },
+      ar: { title: 'استلمت مكافأتك', body: `${w.title} مقابل ${fmtPts(cost)} نقطة` },
+      en: { title: 'Reward redeemed', body: `${w.title} for ${fmtPts(cost)} points` },
     });
     await audit(c, { actorType: 'STAFF', actorId: ctx.staffId, businessId: ctx.businessId, action: 'reward.redeem', entityId: r.txId, data: { rewardId, points: cost, requestId: ctx.requestId } });
     return { ok: true, replayed: false, title: w.title as string, pointsSpent: cost, newBalance: r.newBalance, transactionId: r.txId };
@@ -252,8 +252,8 @@ export class RedeemService {
       )
     ).rows[0];
     await notify(c, k.user_id, 'OFFER_USED', {
-      ar: { title: 'استعملت العرض 🎁', body: k.title },
-      en: { title: 'Offer used 🎁', body: k.title },
+      ar: { title: 'استعملت العرض', body: k.title },
+      en: { title: 'Offer used', body: k.title },
     });
     await audit(c, { actorType: 'STAFF', actorId: ctx.staffId, businessId: ctx.businessId, action: 'booking.redeem', entityId: bookingId, data: { requestId: ctx.requestId } });
     return { ok: true, replayed: false, newBalance, booking: bookingJson({ ...upd, offer_title: k.title, points_cost: k.points_cost }) };
