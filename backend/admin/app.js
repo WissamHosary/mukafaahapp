@@ -1203,7 +1203,8 @@
     const cats = S.categories.filter((c) => c.active);
     const secs = (o.sections || []).filter((s) => s.active);
     return `<div class="phone"><div class="scr"><div class="sb"><span>9:41</span><span class="notch"></span><span class="bat"></span></div>
-      <div class="ah"><span class="mark"></span><b>Mukafaah</b><span class="pts">1,200 pts</span></div>
+      <div class="pv-hero"><div class="pv-hi"><span class="av">L</span><span><small>Good evening</small><b>Lara</b></span></div><small>Your points</small><b class="n">2,450</b><span class="tm">Gold member · 7 shops</span></div>
+      <div class="pv-acts"><i><b>View Points</b></i><i class="y"><b>Offers &amp; Rewards</b></i></div>
       <div class="inner">${ban}
         ${(secs.length ? secs : [{ type: 'CATEGORIES', titleEn: 'Categories' }]).map((s) => {
           const title = `<div class="pv-sec">${esc(s.titleEn || SECTION_NAME[s.type] || s.type)}</div>`;

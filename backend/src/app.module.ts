@@ -24,7 +24,7 @@ class HealthController {
   @Get()
   async health() {
     await this.db.query('SELECT 1');
-    return { status: 'ok', service: 'mukafaah-api', version: '0.7.0' };
+    return { status: 'ok', service: 'mukafaah-api', version: '0.8.0' };
   }
 }
 

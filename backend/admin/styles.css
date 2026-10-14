@@ -795,3 +795,17 @@ svg.chart .area { animation: fade .6s .25s both; }
 #layoutbox .lay b { display: block; font-size: 14px; }
 #layoutbox .lay small { color: var(--ink-3, #857B8E); font-size: 12px; }
 #layoutbox .lay:has(input:checked) { border-color: var(--brand, #2C123F); box-shadow: 0 0 0 1px var(--brand, #2C123F); }
+/* v0.8 phone preview: the purple coin header and the two big buttons */
+.phone .scr .sb { position: relative; z-index: 2; color: #fff; }
+.phone .pv-hero { margin-top: -30px; padding: 34px 14px 40px; color: #fff; text-align: center; border-radius: 0 0 20px 20px; background: radial-gradient(120% 90% at 80% 0%, #6A3CA0, #2C123F 60%); }
+.phone .pv-hero small { display: block; font-size: 9px; opacity: .75; }
+.phone .pv-hero .n { display: block; font-size: 30px; font-weight: 900; color: #FBD404; letter-spacing: -1px; line-height: 1.05; }
+.phone .pv-hero .tm { font-size: 9px; opacity: .9; }
+.phone .pv-hi { display: flex; align-items: center; gap: 6px; text-align: left; margin-bottom: 8px; }
+.phone .pv-hi .av { width: 22px; height: 22px; border-radius: 50%; background: #7446A8; box-shadow: 0 0 0 2px #FBD404; display: grid; place-items: center; font-size: 10px; font-weight: 800; }
+.phone .pv-hi b { font-size: 11px; display: block; }
+.phone .pv-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: -26px 12px 4px; position: relative; }
+.phone .pv-acts i { height: 52px; border-radius: 12px; background: radial-gradient(130% 120% at 100% 0%, #7446A8, #2C123F); display: flex; align-items: flex-end; padding: 7px; font-style: normal; }
+.phone .pv-acts i.y { background: radial-gradient(130% 120% at 100% 0%, #FFE97A, #FBD404 45%, #EDB900); }
+.phone .pv-acts b { font-size: 9px; color: #fff; } .phone .pv-acts i.y b { color: #2C123F; }
+.phone .scr .sb .bat { border-color: #fff; }
