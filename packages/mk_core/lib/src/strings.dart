@@ -43,7 +43,7 @@ class S {
   String get phoneTitle => tr('شو رقم تلفونك؟', "What's your phone number?");
   String get phoneBody => tr('رح نبعتلك رمز تحقق برسالة.', "We'll text you a verification code.");
   String get otpTitle => tr('أدخل رمز التحقق', 'Enter the code');
-  String otpBody(String last4) => tr('بعتنا رمز من ٦ أرقام للرقم المنتهي بـ $last4', 'We sent a 6-digit code to the number ending $last4');
+  String otpBody(String last4) => tr('بعتنالك رمز من ٦ أرقام على واتساب، للرقم المنتهي بـ $last4', 'We sent a 6-digit code on WhatsApp to the number ending $last4');
   String resendIn(int s) => tr('إعادة الإرسال بعد $s ث', 'Resend in ${s}s');
   String get resend => tr('إعادة إرسال الرمز', 'Resend code');
   String get devCode => tr('رمز التجربة', 'Test code');
@@ -59,6 +59,12 @@ class S {
         'OTP_COOLDOWN' => tr('استنى شوي قبل ما تطلب رمز جديد', 'Please wait before requesting a new code'),
         'OTP_LIMIT_PHONE' || 'OTP_LIMIT_IP' || 'OTP_LIMIT_DEVICE' => tr('طلبات كثيرة، جرّب بعد شوي', 'Too many requests, try again later'),
         'VALIDATION_FAILED' => tr('تأكد من المعلومات', 'Please check the details'),
+        'LOGIN_INVALID' => tr('الرقم أو كلمة السر غلط', 'Wrong phone number or password'),
+        'LOGIN_LOCKED' => tr('محاولات كثيرة. جرّب بعد ١٥ دقيقة أو غيّر كلمة السر برمز واتساب', 'Too many tries. Wait 15 minutes or reset it with a WhatsApp code'),
+        'LOGIN_LIMIT_IP' || 'CHECK_LIMIT' => tr('طلبات كثيرة، جرّب بعد شوي', 'Too many requests, try again later'),
+        'PASSWORD_WRONG' => tr('كلمة السر الحالية غلط', 'Current password is wrong'),
+        'PASSWORD_CODE_NEEDED' => tr('أكّد رقمك برمز واتساب أول', 'Confirm your number with a WhatsApp code first'),
+        'OTP_SEND_FAILED' => tr('ما قدرنا نبعت الرمز على واتساب، جرّب كمان مرة', "Couldn't send the code on WhatsApp, try again"),
         'INSUFFICIENT_BALANCE' => tr('النقاط مش كافية', 'Not enough points'),
         'STAFF_LIMIT_BILL' => tr('الفاتورة أعلى من الحد المسموح إلك', 'Bill is above your limit'),
         'STAFF_LIMIT_TX' => tr('النقاط أعلى من حدك للفاتورة', 'Points exceed your per-bill limit'),

@@ -92,6 +92,13 @@ const zRating = z.strictObject({ stars: z.number().int().min(1).max(5), comment:
 
 const LIVE_OFFER = `o.status = 'ACTIVE' AND NOT o.hidden_by_admin AND o.valid_from <= current_date AND (o.valid_to IS NULL OR o.valid_to >= current_date)`;
 
+/** "Lara Haddad" becomes "Lara H." on public reviews. */
+function reviewerName(name: string | null): string {
+  const parts = String(name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return 'Mukafaah member';
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.` : parts[0];
+}
+
 @Controller('v1/customer')
 @RequireUser()
 export class CatalogController {
@@ -324,13 +331,14 @@ export class CatalogController {
   async shop(@Auth() a: UserAuth, @Param('id') id: string) {
     const bid = parse(zUuid, id);
     const r = await this.db.one(
-      `SELECT ${SHOP_CARD_SELECT}, b.instagram, b.store_enabled FROM businesses b ${SHOP_CARD_JOINS}
+      `SELECT ${SHOP_CARD_SELECT}, b.instagram, b.facebook, b.tiktok, b.website, b.phone, b.hours, b.store_enabled
+         FROM businesses b ${SHOP_CARD_JOINS}
         WHERE b.id = $2 AND b.status = 'ACTIVE'`,
       [a.userId, bid],
     );
     if (!r) throw Errors.notFound('Shop');
     const card = shopCard(r);
-    const [offers, rewards, products, mine, branches, bookings] = await Promise.all([
+    const [offers, rewards, products, mine, branches, bookings, banners, reviews, stars] = await Promise.all([
       this.db.query(
         `SELECT ${OFFER_SELECT} FROM offers o JOIN businesses b ON b.id = o.business_id
           WHERE o.business_id = $1 AND ${LIVE_OFFER} ORDER BY o.created_at DESC`,
@@ -352,12 +360,43 @@ export class CatalogController {
         `SELECT offer_id, status FROM offer_bookings WHERE business_id = $1 AND user_id = $2 AND status IN ('REQUESTED','ACCEPTED')`,
         [bid, a.userId],
       ),
+      this.db.query(`SELECT media_id, caption FROM business_banners WHERE business_id = $1 ORDER BY sort, created_at LIMIT 10`, [bid]),
+      this.db.query(
+        `SELECT r.stars, r.comment, r.updated_at, u.name, r.user_id = $2 AS mine
+           FROM business_ratings r JOIN users u ON u.id = r.user_id
+          WHERE r.business_id = $1 AND NOT r.hidden
+          ORDER BY (r.comment IS NOT NULL AND r.comment <> '') DESC, r.updated_at DESC LIMIT 20`,
+        [bid, a.userId],
+      ),
+      this.db.query(
+        `SELECT stars, count(*)::int AS n FROM business_ratings WHERE business_id = $1 AND NOT hidden GROUP BY stars`,
+        [bid],
+      ),
     ]);
     const visited = await this.db.one(`SELECT 1 FROM visits WHERE business_id = $1 AND user_id = $2 LIMIT 1`, [bid, a.userId]);
     const openBooking = new Map(bookings.rows.map((x) => [x.offer_id, x.status]));
     return {
       ...card,
       instagram: r.instagram ?? null,
+      social: {
+        instagram: r.instagram ?? null,
+        facebook: r.facebook ?? null,
+        tiktok: r.tiktok ?? null,
+        website: r.website ?? null,
+        whatsapp: r.whatsapp ?? null,
+        phone: r.phone ?? null,
+      },
+      hours: r.hours ?? null,
+      banners: banners.rows.map((x) => ({ url: mediaUrl(x.media_id), caption: x.caption ?? null })),
+      reviews: reviews.rows.map((x) => ({
+        name: reviewerName(x.name),
+        stars: Number(x.stars),
+        comment: x.comment ?? null,
+        at: x.updated_at,
+        mine: !!x.mine,
+      })),
+      // How many reviews gave 1 to 5 stars.
+      starCounts: [1, 2, 3, 4, 5].map((n) => Number(stars.rows.find((x) => Number(x.stars) === n)?.n ?? 0)),
       storeEnabled: !!r.store_enabled,
       branches: branches.rows.map((x) => x.name),
       offers: offers.rows.map((o) => ({ ...offerJson(o), myOpenBooking: openBooking.get(o.id) ?? null })),

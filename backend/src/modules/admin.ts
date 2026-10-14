@@ -16,7 +16,7 @@ import { Db, type Tx } from '../platform/db.js';
 import { AppError, Errors } from '../platform/errors.js';
 import { parse, zUuid } from '../platform/validation.js';
 import { saveImage } from './media.js';
-import { clearSettingsCache, earnPercent, loadTierRows, mediaUrl } from './shared.js';
+import { clearSettingsCache, earnPercent, loadTierRows, mediaUrl, prettyPhone } from './shared.js';
 
 const zKey = z.string().trim().toUpperCase().regex(/^[A-Z0-9_]{2,40}$/);
 const zQ = z.object({ q: z.string().trim().max(60).optional(), status: z.string().max(20).optional() });
@@ -220,6 +220,16 @@ export class AdminController {
     private readonly db: Db,
     private readonly crypto: CryptoService,
   ) {}
+
+  /** A search that looks like a phone number also matches the full number. */
+  private searchPhoneHash(q?: string): Buffer | null {
+    if (!q || !/^[+0-9 ()-]{6,20}$/.test(q)) return null;
+    try {
+      return this.crypto.phoneHash(this.crypto.normalizePhone(q, false));
+    } catch {
+      return null;
+    }
+  }
 
   private log(a: AdminAuth, action: string, entityId?: string, data?: Record<string, unknown>, ip?: string) {
     return this.db.tx((c) => audit(c, { actorType: 'USER', actorId: a.userId, action: `admin.${action}`, entityId, data, ip }));
@@ -604,12 +614,13 @@ export class AdminController {
     return { ok: true };
   }
 
-  // ---------- Customers (read only, masked) ----------
+  // ---------- Customers (read only) ----------
   @Get('customers')
   async customers(@Query() q: unknown) {
     const f = parse(zQ, q);
     const r = await this.db.query(
-      `SELECT u.id, u.name, u.phone_last4, u.email, u.created_at, u.referral_code, u.tier, u.lifetime_spend_minor,
+      `SELECT u.id, u.name, u.phone_last4, u.phone_enc, u.email, u.gender, u.birth_year, u.password_hash IS NOT NULL AS has_password,
+              u.created_at, u.referral_code, u.tier, u.lifetime_spend_minor,
               COALESCE((SELECT SUM(ab.balance) FROM ledger_accounts a JOIN account_balances ab ON ab.account_id = a.id
                          JOIN programs p ON p.id = a.program_id
                          WHERE a.owner_type = 'CUSTOMER' AND a.owner_id = u.id AND p.type <> 'PLATFORM'), 0) AS balance,
@@ -618,15 +629,20 @@ export class AdminController {
                          WHERE a.owner_type = 'CUSTOMER' AND a.owner_id = u.id AND p.type = 'PLATFORM'), 0) AS mukafaah,
               (SELECT count(*)::int FROM visits v WHERE v.user_id = u.id) AS visits
          FROM users u
-        WHERE ($1::text IS NULL OR u.name ILIKE '%' || $1 || '%' OR u.phone_last4 = $1 OR u.referral_code = upper($1))
+        WHERE ($1::text IS NULL OR u.name ILIKE '%' || $1 || '%' OR u.phone_last4 = $1 OR u.referral_code = upper($1)
+               OR u.email ILIKE '%' || $1 || '%' OR ($2::bytea IS NOT NULL AND u.phone_hash = $2))
         ORDER BY u.created_at DESC LIMIT 200`,
-      [f.q || null],
+      [f.q || null, this.searchPhoneHash(f.q)],
     );
     return r.rows.map((u) => ({
       id: u.id,
       name: u.name,
-      // Google members may have no phone: show their masked Gmail instead.
-      phone: u.phone_last4 ? `•••• ${u.phone_last4}` : u.email ? u.email.replace(/^(.).*(@.*)$/, '$1•••$2') : '',
+      // The number they signed up with (Google members may have none).
+      phone: u.phone_enc ? prettyPhone(this.crypto.decrypt(u.phone_enc)) : '',
+      email: u.email ?? null,
+      gender: u.gender ?? null,
+      age: u.birth_year ? new Date().getFullYear() - u.birth_year : null,
+      hasPassword: !!u.has_password,
       referralCode: u.referral_code,
       balance: Number(u.balance),
       mukafaahPoints: Number(u.mukafaah),
@@ -675,9 +691,15 @@ export class AdminController {
   @Get('admins')
   async admins() {
     const r = await this.db.query(
-      `SELECT a.user_id, a.role, a.active, u.name, u.phone_last4 FROM admins a JOIN users u ON u.id = a.user_id ORDER BY a.created_at`,
+      `SELECT a.user_id, a.role, a.active, u.name, u.phone_last4, u.phone_enc FROM admins a JOIN users u ON u.id = a.user_id ORDER BY a.created_at`,
     );
-    return r.rows.map((x) => ({ userId: x.user_id, role: x.role, active: x.active, name: x.name, phone: `•••• ${x.phone_last4}` }));
+    return r.rows.map((x) => ({
+      userId: x.user_id,
+      role: x.role,
+      active: x.active,
+      name: x.name,
+      phone: x.phone_enc ? prettyPhone(this.crypto.decrypt(x.phone_enc)) : `•••• ${x.phone_last4}`,
+    }));
   }
 
   /** Owners add other admins; the person signs in once with that phone first. */

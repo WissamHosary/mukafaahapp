@@ -11,7 +11,13 @@ const schema = z.object({
     .string()
     .default('false')
     .transform((v) => v === 'true'),
-  OTP_PROVIDER: z.enum(['console']).default('console'),
+  // Where sign-in codes are sent. "whatsapp" uses the WhatsApp Business
+  // Cloud API with an approved Authentication template.
+  OTP_PROVIDER: z.enum(['console', 'whatsapp']).default('console'),
+  WHATSAPP_TOKEN: z.string().default(''),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().default(''),
+  WHATSAPP_OTP_TEMPLATE: z.string().default('mukafaah_otp'),
+  WHATSAPP_API_VERSION: z.string().default('v21.0'),
   OTP_ALLOWED_COUNTRIES: z.string().default('LB'),
   DEFAULT_PHONE_REGION: z.string().default('LB'),
   // Comma-separated browser origins allowed to call the API (web test builds).
@@ -39,6 +45,10 @@ export function loadConfig(): AppConfig {
   const cfg = parsed.data;
   if (cfg.NODE_ENV === 'production' && cfg.OTP_DEV_ECHO) {
     console.error('OTP_DEV_ECHO must be false in production');
+    process.exit(1);
+  }
+  if (cfg.OTP_PROVIDER === 'whatsapp' && (!cfg.WHATSAPP_TOKEN || !cfg.WHATSAPP_PHONE_NUMBER_ID)) {
+    console.error('OTP_PROVIDER=whatsapp needs WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID');
     process.exit(1);
   }
   return cfg;

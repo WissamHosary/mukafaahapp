@@ -17,7 +17,7 @@
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* private mode */ } },
   };
-  const VERSION = '0.8.0';
+  const VERSION = '0.9.0';
 
   // ---------- Icons (inline SVG, 24px grid) ----------
   const IC = {
@@ -38,6 +38,7 @@
     bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
     chevd: '<path d="M6 9l6 6 6-6"/>',
     chevr: '<path d="M9 18l6-6-6-6"/>',
+    chevl: '<path d="M15 18l-6-6 6-6"/>',
     chevl2: '<path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
     logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
@@ -211,7 +212,7 @@
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       out = file.type === 'image/png' ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.86);
     }
-    if (target) return api('POST', target.path, { purpose: target.purpose || 'item', dataBase64: out });
+    if (target) return api('POST', target.path, { ...(target.purpose === false ? {} : { purpose: target.purpose || 'item' }), ...(target.extra || {}), dataBase64: out });
     return api('POST', '/v1/admin/media', { dataBase64: out });
   }
   const dropEmpty = (label) => `<div class="dz">${ic('upload', 'lg')}<span>${esc(label || 'Click or drop an image')}</span><small class="faint">PNG, JPG or WebP</small></div>`;
@@ -788,7 +789,7 @@
   // =====================================================================
   const WS_TABS = [
     ['overview', 'Overview', 'dashboard'], ['profile', 'Profile', 'store'], ['offers', 'Offers', 'tag'], ['rewards', 'Rewards', 'gift'],
-    ['store', 'Online store', 'bag'], ['orders', 'Orders', 'box'], ['bookings', 'Bookings', 'calendar'], ['team', 'Team & logins', 'users'], ['bills', 'Bills', 'receipt'],
+    ['store', 'Online store', 'bag'], ['orders', 'Orders', 'box'], ['bookings', 'Bookings', 'calendar'], ['team', 'Team & logins', 'users'], ['reviews', 'Reviews', 'star'], ['bills', 'Bills', 'receipt'],
   ];
   const ST_CLS = { ACTIVE: 'ok', PAUSED: '', ARCHIVED: '', REQUESTED: 'y', ACCEPTED: 'pur', DECLINED: 'bad', CANCELLED: 'bad', REDEEMED: 'ok', EXPIRED: '', NEW: 'y', CONFIRMED: 'pur', READY: 'ok', COMPLETED: 'ok' };
   const pill = (st) => `<span class="pill ${ST_CLS[st] || ''}">${esc(st.charAt(0) + st.slice(1).toLowerCase())}</span>`;
@@ -822,7 +823,7 @@
       <div class="tabs ws-tabs">${WS_TABS.map(([k, t, i]) => `<a class="tab ${k === tab ? 'on' : ''}" href="#shop/${esc(id)}/${k}">${ic(i, 'sm')}${esc(t)}</a>`).join('')}</div>
       <div class="ws-body" id="ws"></div>`);
     const ws = $('#ws', v);
-    const T = { overview: wsOverview, profile: wsProfile, offers: wsOffers, rewards: wsRewards, store: wsStore, orders: wsOrders, bookings: wsBookings, team: wsTeam, bills: wsBills }[tab] || wsOverview;
+    const T = { overview: wsOverview, profile: wsProfile, offers: wsOffers, rewards: wsRewards, store: wsStore, orders: wsOrders, bookings: wsBookings, team: wsTeam, reviews: wsReviews, bills: wsBills }[tab] || wsOverview;
     ws.innerHTML = skeleton(4);
     try { await T(ws, shop); } catch (e) { ws.innerHTML = `<div class="card">${empty('alert', 'Couldn’t load this', errText(e))}</div>`; }
   }
@@ -873,6 +874,7 @@
 
   async function wsProfile(ws, shop) {
     const shopRole = isShop();
+    let pin = shop.lat != null ? [Number(shop.lat), Number(shop.lng)] : null;
     ws.innerHTML = `<form class="card" id="pf" novalidate>
       <div class="fgrid">
         ${dropHtml('logo', shop.logoUrl, 'Logo', 'Square, at least 400 px')}
@@ -884,11 +886,33 @@
         <label class="f"><span>Category</span><select class="in" name="category" ${shopRole ? 'disabled' : ''}>${S.categories.length ? S.categories.map((c) => opt(c.key, c.nameEn, shop.category)).join('') : opt(shop.category, shop.category, shop.category)}</select></label>
         <label class="f"><span>City</span><input class="in" name="city" maxlength="60" value="${esc(shop.city || '')}"></label>
         <label class="f"><span>Area / street</span><input class="in" name="address" maxlength="160" value="${esc(shop.address || '')}"></label>
-        <label class="f"><span>WhatsApp for orders</span><input class="in" name="whatsapp" value="${esc(shop.whatsapp || '')}" placeholder="+961 …"></label>
-        <label class="f"><span>Instagram</span><input class="in" name="instagram" value="${esc(shop.instagram || '')}"></label>
+        <label class="f"><span>Opening hours</span><input class="in" name="hours" maxlength="120" value="${esc(shop.hours || '')}" placeholder="Every day 8:00 to 23:00"></label>
+        <label class="f"><span>Shop phone</span><input class="in" name="phone" value="${esc(shop.phone || '')}" placeholder="+961 1 234 567"><em>Customers can call it from the shop page.</em></label>
       </div>
-      <label class="f"><span>Location</span><input class="in" name="loc" value="${shop.lat != null ? esc(`${shop.lat}, ${shop.lng}`) : ''}" placeholder='Google Maps link or "lat, lng"'>${shop.lat != null ? `<em><a href="https://www.google.com/maps?q=${esc(shop.lat)},${esc(shop.lng)}" target="_blank" rel="noopener">${ic('link', 'xs')} Open on Google Maps</a></em>` : ''}</label>
       <label class="f"><span>About the shop</span><textarea class="in" name="description" maxlength="600">${esc(shop.description || '')}</textarea></label>
+
+      <div class="fsec">Social links <small class="faint">Shown as buttons on the shop page</small></div>
+      <div class="fgrid">
+        <label class="f"><span>Instagram</span><input class="in" name="instagram" maxlength="60" value="${esc(shop.instagram || '')}" placeholder="@cedarcafe"></label>
+        <label class="f"><span>Facebook</span><input class="in" name="facebook" maxlength="120" value="${esc(shop.facebook || '')}" placeholder="cedarcafe or a facebook.com link"></label>
+        <label class="f"><span>TikTok</span><input class="in" name="tiktok" maxlength="60" value="${esc(shop.tiktok || '')}" placeholder="@cedarcafe"></label>
+        <label class="f"><span>WhatsApp</span><input class="in" name="whatsapp" value="${esc(shop.whatsapp || '')}" placeholder="+961 …"><em>Also used for orders.</em></label>
+        <label class="f"><span>Website</span><input class="in" name="website" maxlength="200" value="${esc(shop.website || '')}" placeholder="https://"></label>
+      </div>
+
+      <div class="fsec">Location on the map <small class="faint">Customers see this map on the shop page</small></div>
+      <div class="mp-wrap">
+        <div class="mp" id="mp" tabindex="0" aria-label="Map: click to place the shop"></div>
+        <div class="mp-side">
+          <label class="f"><span>Or paste a Google Maps link</span><input class="in" name="loc" value="${pin ? esc(`${pin[0]}, ${pin[1]}`) : ''}" placeholder='Link or "33.8938, 35.5018"'></label>
+          <p class="faint mp-tip">Click on the map to drop the pin, drag to move around, scroll or use + and − to zoom.</p>
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <button type="button" class="btn ghost sm" id="mpClear">${ic('trash', 'sm')} Remove pin</button>
+            <a class="btn ghost sm" id="mpOpen" target="_blank" rel="noopener" ${pin ? `href="https://www.google.com/maps?q=${pin[0]},${pin[1]}"` : 'hidden'}>${ic('link', 'sm')} Check on Google Maps</a>
+          </div>
+        </div>
+      </div>
+
       <div class="optcard">
         <div class="swrow">${toggle('listed', shop.listed !== false)}<div class="t"><b>Visible in the customer app</b><small>Turn off to hide the shop without deleting anything.</small></div></div>
         <div class="swrow">${toggle('allowTransfer', !!shop.allowTransfer)}<div class="t"><b>Customers can send these points to friends</b></div></div>
@@ -899,20 +923,30 @@
         ${shopRole ? '' : `<label class="f"><span>Private note</span><input class="in" name="adminNote" maxlength="500" value="${esc(shop.adminNote || '')}"><em>Only Mukafaah sees this.</em></label>`}
       </div>
       <div class="row end"><button class="btn">Save shop</button></div>
-    </form>`;
+    </form>
+    <div class="card mt16" id="bn"></div>`;
     const f = $('#pf', ws);
     wireDrop(f, 'logo', 600, { path: `${base(shop)}/media`, purpose: 'logo' });
     wireDrop(f, 'cover', 1800, { path: `${base(shop)}/media`, purpose: 'cover' });
+    const open = $('#mpOpen', f);
+    const setLink = () => { if (pin) { open.hidden = false; open.href = `https://www.google.com/maps?q=${pin[0]},${pin[1]}`; } else open.hidden = true; };
+    const map = mapPicker($('#mp', f), pin, (ll) => { pin = ll; f.elements.loc.value = `${ll[0].toFixed(6)}, ${ll[1].toFixed(6)}`; setLink(); });
+    f.elements.loc.oninput = () => { const ll = parseLatLng(f.elements.loc.value); if (ll) { pin = ll; map.set(ll); setLink(); } };
+    $('#mpClear', f).onclick = () => { pin = null; f.elements.loc.value = ''; map.set(null); setLink(); };
+    wsBanners($('#bn', ws), shop);
     f.onsubmit = async (e) => {
       e.preventDefault();
-      const ll = parseLatLng(val(f, 'loc'));
-      if (val(f, 'loc') && !ll) { toast('Couldn’t read that location.', true); return; }
+      if (val(f, 'loc') && !parseLatLng(val(f, 'loc'))) { toast('Couldn’t read that location.', true); return; }
+      const web = val(f, 'website');
+      if (web && !/^https?:\/\/\S+$/.test(web)) { toast('Start the website with https://', true); return; }
       const btn = $('button.btn:not(.ghost)', f); btn.disabled = true;
       try {
+        const handle = (k) => orNull(val(f, k).replace(/^@/, ''));
         const prof = {
           name: val(f, 'name'), city: orNull(val(f, 'city')), address: orNull(val(f, 'address')),
-          whatsapp: orNull(val(f, 'whatsapp')), instagram: orNull(val(f, 'instagram').replace(/^@/, '')), description: orNull(val(f, 'description')),
-          lat: ll ? ll[0] : null, lng: ll ? ll[1] : null, listed: f.elements.listed.checked, allowTransfer: f.elements.allowTransfer.checked,
+          whatsapp: orNull(val(f, 'whatsapp')), instagram: handle('instagram'), facebook: orNull(val(f, 'facebook')), tiktok: handle('tiktok'),
+          website: orNull(web), phone: orNull(val(f, 'phone')), hours: orNull(val(f, 'hours')), description: orNull(val(f, 'description')),
+          lat: pin ? pin[0] : null, lng: pin ? pin[1] : null, listed: f.elements.listed.checked, allowTransfer: f.elements.allowTransfer.checked,
         };
         if (!shopRole) prof.category = val(f, 'category');
         await api('PATCH', `${base(shop)}/profile`, prof);
@@ -924,6 +958,140 @@
         reloadTab();
       } catch (err) { fail(err); } finally { btn.disabled = false; }
     };
+  }
+
+  /** Banners: pictures that slide at the top of the shop page in the app. */
+  function wsBanners(box, shop) {
+    let list = (shop.banners || []).slice();
+    const draw = () => {
+      box.innerHTML = `<div class="card-h"><h3>Banners</h3><small class="faint">Up to 10 wide pictures (about 16:9) that slide at the top of the shop page. Use them for new items, events or offers.</small></div>
+        <div class="bn-grid">${list.map((b, i) => `
+          <div class="bn"><img src="${esc(b.url)}" alt=""><span class="bn-n">${i + 1}</span>
+            ${b.caption ? `<span class="bn-cap">${esc(b.caption)}</span>` : ''}
+            <div class="bn-act">
+              <button type="button" class="iconbtn sm" data-mv="${i}:-1" ${i === 0 ? 'disabled' : ''} aria-label="Move earlier">${ic('chevl', 'sm')}</button>
+              <button type="button" class="iconbtn sm" data-mv="${i}:1" ${i === list.length - 1 ? 'disabled' : ''} aria-label="Move later">${ic('chevr', 'sm')}</button>
+              <button type="button" class="iconbtn sm" data-del="${esc(b.id)}" aria-label="Delete banner">${ic('trash', 'sm')}</button>
+            </div></div>`).join('')}
+          ${list.length < 10 ? `<button type="button" class="bn add" id="bnAdd">${ic('upload', 'lg')}<span>Add a banner</span><small class="faint">Click or drop an image</small></button>` : ''}
+        </div>
+        <label class="f mt8" style="max-width:420px"><span>Caption for the next banner (optional)</span><input class="in" id="bnCap" maxlength="80" placeholder="New: iced latte"></label>`;
+      const add = $('#bnAdd', box);
+      if (add) {
+        const file = document.createElement('input');
+        file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp'; file.hidden = true; add.after(file);
+        const take = async (fl) => {
+          if (!fl) return;
+          add.disabled = true; add.innerHTML = '<div class="skel h120" style="width:100%"></div>';
+          try {
+            const cap = $('#bnCap', box).value.trim();
+            const img = await uploadImage(fl, 1800, { path: `${base(shop)}/banners`, purpose: false, extra: cap ? { caption: cap } : {} });
+            list.push(img);
+            toast('Banner added. It shows in the app now.');
+          } catch (e) { fail(e); }
+          draw();
+        };
+        add.onclick = () => file.click();
+        add.ondragover = (e) => e.preventDefault();
+        add.ondrop = (e) => { e.preventDefault(); take(e.dataTransfer.files[0]); };
+        file.onchange = () => take(file.files[0]);
+      }
+      $$('[data-del]', box).forEach((b) => b.onclick = async () => {
+        try { await api('DELETE', `${base(shop)}/banners/${b.dataset.del}`); list = list.filter((x) => x.id !== b.dataset.del); toast('Banner removed'); draw(); } catch (e) { fail(e); }
+      });
+      $$('[data-mv]', box).forEach((b) => b.onclick = async () => {
+        const [i, d] = b.dataset.mv.split(':').map(Number);
+        [list[i], list[i + d]] = [list[i + d], list[i]];
+        draw();
+        try { await api('PUT', `${base(shop)}/banners/order`, { ids: list.map((x) => x.id) }); } catch (e) { fail(e); }
+      });
+    };
+    draw();
+  }
+
+  /** Customer reviews; Mukafaah can hide one that breaks the rules. */
+  async function wsReviews(ws, shop) {
+    const rows = await api('GET', `${base(shop)}/reviews`);
+    const shown = rows.filter((r) => !r.hidden);
+    const avg = shown.length ? shown.reduce((a, r) => a + r.stars, 0) / shown.length : 0;
+    const counts = [5, 4, 3, 2, 1].map((n) => [n, shown.filter((r) => r.stars === n).length]);
+    const stars = (n) => `<span class="stars">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= n ? 'on' : ''}">${ic('star', 'xs')}</i>`).join('')}</span>`;
+    ws.innerHTML = `<div class="rv-top card">
+        <div class="rv-avg"><b>${shown.length ? avg.toFixed(1) : '–'}</b>${stars(Math.round(avg))}<small>${shown.length} review${shown.length === 1 ? '' : 's'} in the app</small></div>
+        <div class="rv-bars">${counts.map(([n, c]) => `<div class="rv-bar"><span>${n}</span><i><b style="width:${shown.length ? Math.round(c / shown.length * 100) : 0}%"></b></i><em>${c}</em></div>`).join('')}</div>
+      </div>
+      <div class="card flush mt16"><div class="tw"><table class="tbl"><thead><tr><th>Customer</th><th>Stars</th><th>Review</th><th>Date</th><th></th></tr></thead><tbody>
+      ${rows.length ? rows.map((r) => `<tr class="${r.hidden ? 'dim' : ''}"><td><b>${esc(r.name || 'Member')}</b></td><td>${stars(r.stars)}</td><td class="wrap">${r.comment ? esc(r.comment) : '<span class="faint">Stars only</span>'}</td><td class="muted">${esc(day(r.at))}</td>
+        <td class="r"><button class="btn ghost sm" data-hide="${esc(r.userId)}" data-h="${r.hidden ? '0' : '1'}">${r.hidden ? 'Show again' : 'Hide'}</button></td></tr>`).join('') : `<tr><td colspan="5">${empty('star', 'No reviews yet', 'Customers can rate a shop after their first visit.')}</td></tr>`}
+      </tbody></table></div></div>`;
+    $$('[data-hide]', ws).forEach((b) => b.onclick = async () => {
+      try { await api('PATCH', `${base(shop)}/reviews/${b.dataset.hide}`, { hidden: b.dataset.h === '1' }); toast(b.dataset.h === '1' ? 'Review hidden from the app' : 'Review shown again'); reloadTab(); } catch (e) { fail(e); }
+    });
+  }
+
+  /**
+   * A small street map (OpenStreetMap tiles) to place a shop: click to drop
+   * the pin, drag to pan, scroll or +/- to zoom. Returns { set(latLng|null) }.
+   */
+  function mapPicker(el, start, onPick) {
+    const T = 256;
+    const BEIRUT = [33.8938, 35.5018];
+    let z = start ? 16 : 12;
+    let pin = start;
+    const world = (ll, zz = z) => {
+      const n = T * 2 ** zz, s = Math.sin(ll[0] * Math.PI / 180);
+      return [(ll[1] + 180) / 360 * n, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n];
+    };
+    const unworld = (p, zz = z) => {
+      const n = T * 2 ** zz, lng = p[0] / n * 360 - 180, k = Math.PI - 2 * Math.PI * p[1] / n;
+      return [180 / Math.PI * Math.atan(0.5 * (Math.exp(k) - Math.exp(-k))), lng];
+    };
+    let c = world(start || BEIRUT);
+    el.innerHTML = `<div class="mp-tiles"></div><span class="mp-pin" hidden>${ic('pin', 'lg')}</span>
+      <div class="mp-zoom"><button type="button" data-z="1" aria-label="Zoom in">+</button><button type="button" data-z="-1" aria-label="Zoom out">−</button></div>
+      <span class="mp-attr">© OpenStreetMap contributors</span>`;
+    const tiles = $('.mp-tiles', el), pinEl = $('.mp-pin', el);
+    const draw = () => {
+      const W = el.clientWidth, H = el.clientHeight, n = 2 ** z;
+      const x0 = c[0] - W / 2, y0 = c[1] - H / 2;
+      let html = '';
+      for (let ty = Math.floor(y0 / T); ty <= Math.floor((y0 + H) / T); ty++) {
+        if (ty < 0 || ty >= n) continue;
+        for (let tx = Math.floor(x0 / T); tx <= Math.floor((x0 + W) / T); tx++) {
+          const wx = ((tx % n) + n) % n;
+          html += `<img alt="" draggable="false" src="https://tile.openstreetmap.org/${z}/${wx}/${ty}.png" style="left:${Math.round(tx * T - x0)}px;top:${Math.round(ty * T - y0)}px">`;
+        }
+      }
+      tiles.innerHTML = html;
+      if (pin) { const p = world(pin); pinEl.hidden = false; pinEl.style.left = `${p[0] - x0}px`; pinEl.style.top = `${p[1] - y0}px`; } else pinEl.hidden = true;
+    };
+    const zoomAt = (dz, px, py) => {
+      const nz = Math.min(19, Math.max(5, z + dz)); if (nz === z) return;
+      const W = el.clientWidth, H = el.clientHeight;
+      const at = unworld([c[0] - W / 2 + px, c[1] - H / 2 + py]);
+      z = nz; const w = world(at); c = [w[0] - px + W / 2, w[1] - py + H / 2]; draw();
+    };
+    let drag = null;
+    el.addEventListener('pointerdown', (e) => { if (e.target.closest('.mp-zoom')) return; drag = { x: e.clientX, y: e.clientY, c: c.slice(), moved: false }; el.setPointerCapture(e.pointerId); });
+    el.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+      if (drag.moved) { c = [drag.c[0] - dx, drag.c[1] - dy]; draw(); }
+    });
+    el.addEventListener('pointerup', (e) => {
+      if (!drag) return;
+      const moved = drag.moved; drag = null;
+      if (moved) return;
+      const r = el.getBoundingClientRect();
+      pin = unworld([c[0] - r.width / 2 + (e.clientX - r.left), c[1] - r.height / 2 + (e.clientY - r.top)]);
+      draw(); onPick(pin);
+    });
+    el.addEventListener('wheel', (e) => { e.preventDefault(); const r = el.getBoundingClientRect(); zoomAt(e.deltaY < 0 ? 1 : -1, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+    $$('[data-z]', el).forEach((b) => b.onclick = () => zoomAt(Number(b.dataset.z), el.clientWidth / 2, el.clientHeight / 2));
+    new ResizeObserver(draw).observe(el);
+    draw();
+    return { set(ll) { pin = ll; if (ll) { z = Math.max(z, 15); c = world(ll); } draw(); } };
   }
 
   // ---------- Offers ----------
@@ -1808,8 +1976,8 @@
   // ---------- Customers ----------
   async function pageCustomers() {
     crumbs([['Customers']]);
-    const v = mount(ph('Customers', 'Read only. Phone numbers are masked for privacy.') + `
-      <div class="card flush"><form class="toolbar" id="sf"><div class="inwrap">${ic('search', 'sm')}<input class="in" id="q" placeholder="Name, last 4 digits or referral code"></div><button class="btn sec sm">Search</button><span class="cnt" id="cnt"></span></form>
+    const v = mount(ph('Customers', 'Everyone who joined Mukafaah, with the phone number or Gmail they signed up with.') + `
+      <div class="card flush"><form class="toolbar" id="sf"><div class="inwrap">${ic('search', 'sm')}<input class="in" id="q" placeholder="Name, phone number, Gmail or referral code"></div><button class="btn sec sm">Search</button><span class="cnt" id="cnt"></span></form>
       <div class="tw"><table class="tbl"><thead><tr><th>Customer</th><th class="r">Shop points</th><th class="r">Mukafaah Points</th><th class="r">Total spend</th><th>Tier</th><th class="r">Visits</th><th>Code · joined</th></tr></thead><tbody id="tb"></tbody></table></div></div>`);
     const run = async (q = '') => {
       $('#tb', v).innerHTML = `<tr><td colspan="7"><div class="skel h20"></div></td></tr>`;
@@ -1817,7 +1985,7 @@
         const rows = await api('GET', '/v1/admin/customers' + (q ? '?q=' + encodeURIComponent(q) : ''));
         $('#cnt', v).textContent = `${rows.length} shown`;
         $('#tb', v).innerHTML = rows.length ? rows.map((u) => `
-          <tr><td><div class="who"><span class="avatar lt">${esc(initials(u.name))}</span><div class="t"><b>${esc(u.name || 'No name yet')}</b><small>${esc(u.phone)}</small></div></div></td>
+          <tr><td><div class="who"><span class="avatar lt">${esc(initials(u.name))}</span><div class="t"><b>${esc(u.name || 'No name yet')}</b><small class="mono">${esc(u.phone || '')}</small>${u.email ? `<small>${esc(u.email)}</small>` : ''}<small class="faint">${[u.gender === 'MALE' ? 'Male' : u.gender === 'FEMALE' ? 'Female' : '', u.age ? `${u.age} years` : '', u.phone ? (u.hasPassword ? 'Password set' : 'No password yet') : 'Google'].filter(Boolean).join(' · ')}</small></div></div></td>
           <td class="r num">${num(u.balance)}</td><td class="r num">${num(u.mukafaahPoints)}</td><td class="r num">${usd(u.lifetimeSpendMinor)}</td><td><span class="pill pur">${esc(String(u.tier || '').charAt(0) + String(u.tier || '').slice(1).toLowerCase())}</span></td>
           <td class="r num">${num(u.visits)}</td><td class="muted"><span class="mono">${esc(u.referralCode || '')}</span> · ${esc(day(u.createdAt))}</td></tr>`).join('') : `<tr><td colspan="7">${empty('users', 'No customers found', '')}</td></tr>`;
       } catch (e) { fail(e); }

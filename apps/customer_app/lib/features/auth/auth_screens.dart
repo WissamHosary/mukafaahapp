@@ -150,7 +150,17 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
                   onPressed: () => context.push('/phone'),
                 ),
               ),
-              const SizedBox(height: MkSpace.xs),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(s.tr('عندك حساب؟', 'Already have an account?'), style: t.bodyMedium?.copyWith(color: MkColors.ink2)),
+                  TextButton(
+                    onPressed: () => context.push('/phone?signin=1'),
+                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                    child: Text(s.tr('فوت', 'Sign in'), style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w800, color: MkColors.purple700)),
+                  ),
+                ],
+              ),
               Text(
                 s.tr('بالمتابعة بتوافق على الشروط وسياسة الخصوصية.', 'By continuing you agree to the Terms and Privacy Policy.'),
                 textAlign: TextAlign.center,
@@ -493,16 +503,48 @@ class _StepDots extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------- Phone and code
+// ---------------------------------------------------------------- Phone, password and code
+
+/// Why a WhatsApp code is being asked for.
+enum OtpPurpose {
+  /// A new number: the code creates the account, then a password is chosen.
+  signUp,
+
+  /// A member who never set a password: the code signs them in, then they choose one.
+  firstPassword,
+
+  /// "Forgot password": the code signs them in, then they choose a new one.
+  reset,
+}
 
 class OtpArgs {
-  const OtpArgs({required this.phone, required this.challenge});
+  const OtpArgs({required this.phone, required this.challenge, this.purpose = OtpPurpose.signUp});
   final String phone;
   final OtpChallenge challenge;
+  final OtpPurpose purpose;
+}
+
+/// The short pass from the last WhatsApp code, used once to choose a password.
+class PasswordPass extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void set(String? v) => state = v;
+}
+
+final passwordPassProvider = NotifierProvider<PasswordPass, String?>(PasswordPass.new);
+
+/// Sends a WhatsApp code and opens the code screen.
+Future<void> _sendCode(BuildContext context, WidgetRef ref, String phone, OtpPurpose purpose) async {
+  final ch = await ref.read(apiProvider).requestOtp(phone, ref.read(localeProvider));
+  if (!context.mounted) return;
+  await context.push('/otp', extra: OtpArgs(phone: phone, challenge: ch, purpose: purpose));
 }
 
 class PhoneScreen extends ConsumerStatefulWidget {
-  const PhoneScreen({super.key});
+  const PhoneScreen({this.signIn = false, super.key});
+
+  /// Opened from "Already have an account? Sign in".
+  final bool signIn;
 
   @override
   ConsumerState<PhoneScreen> createState() => _PhoneScreenState();
@@ -524,9 +566,17 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
     if (digits.length < 7 || _busy) return;
     setState(() => _busy = true);
     try {
-      final ch = await ref.read(apiProvider).requestOtp(digits, ref.read(localeProvider));
+      final st = await ref.read(apiProvider).checkPhone(digits);
       if (!mounted) return;
-      await context.push('/otp', extra: OtpArgs(phone: digits, challenge: ch));
+      if (st.exists && st.hasPassword) {
+        // Members who already chose a password just type it.
+        await context.push('/password', extra: digits);
+      } else {
+        if (widget.signIn && !st.exists) {
+          MkToast.show(context, s.tr('ما في حساب على هالرقم، رح نعملك واحد جديد', "No account on this number yet, we'll create one"));
+        }
+        await _sendCode(context, ref, digits, st.exists ? OtpPurpose.firstPassword : OtpPurpose.signUp);
+      }
     } on ApiException catch (e) {
       if (mounted) MkToast.show(context, s.error(e.code), kind: MkToastKind.error);
     } finally {
@@ -538,19 +588,174 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
   Widget build(BuildContext context) {
     final s = ref.watch(stringsProvider);
     return _StepScaffold(
-      step: 1,
-      title: s.tr('رقم تلفونك', 'Your phone number'),
-      body: s.tr('رح نبعتلك رمز من ٦ أرقام لنتأكد إنو إنت.', "We'll text you a 6-digit code to make sure it's you."),
+      step: widget.signIn ? null : 1,
+      title: widget.signIn ? s.tr('أهلا فيك من جديد', 'Welcome back') : s.tr('رقم تلفونك', 'Your phone number'),
+      body: widget.signIn
+          ? s.tr('اكتب رقمك، وبعدين كلمة السر.', 'Enter your number, then your password.')
+          : s.tr('إذا رقم جديد، منبعتلك رمز على واتساب لنتأكد إنو إنت.', "If it's a new number, we'll send you a code on WhatsApp to make sure it's you."),
       onBack: () => context.canPop() ? context.pop() : context.go('/welcome'),
       bottom: ListenableBuilder(
         listenable: _phone,
         builder: (context, _) => MkButton(
-          label: s.tr('ابعت الرمز', 'Send code'),
+          label: s.tr('كمّل', 'Continue'),
           loading: _busy,
           onPressed: _phone.text.trim().length >= 7 ? _submit : null,
         ),
       ),
-      child: MkPhoneField(controller: _phone, onSubmitted: (_) => _submit()),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MkPhoneField(controller: _phone, onSubmitted: (_) => _submit()),
+          const SizedBox(height: MkSpace.md),
+          const _WhatsAppNote(),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Codes come on WhatsApp" note with the WhatsApp green.
+class _WhatsAppNote extends ConsumerWidget {
+  const _WhatsAppNote();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(color: const Color(0xFFE7F8EE), borderRadius: MkRadius.all(MkRadius.md)),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: const BoxDecoration(color: Color(0xFF25D366), shape: BoxShape.circle),
+            child: const Icon(Icons.chat_rounded, color: Colors.white, size: 17),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              s.tr('رموز التحقق بتوصلك على واتساب، مش رسالة SMS.', 'Verification codes come on WhatsApp, not SMS.'),
+              style: t.bodySmall?.copyWith(color: const Color(0xFF14532D), fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Members with a password: phone was typed on the previous screen.
+class PasswordScreen extends ConsumerStatefulWidget {
+  const PasswordScreen({required this.phone, super.key});
+  final String phone;
+
+  @override
+  ConsumerState<PasswordScreen> createState() => _PasswordScreenState();
+}
+
+class _PasswordScreenState extends ConsumerState<PasswordScreen> {
+  final _pw = TextEditingController();
+  bool _show = false;
+  bool _busy = false;
+  bool _sending = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _pw.dispose();
+    super.dispose();
+  }
+
+  Future<void> _signIn() async {
+    if (_pw.text.isEmpty || _busy) return;
+    final s = ref.read(stringsProvider);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final u = await ref.read(apiProvider).signInWithPassword(widget.phone, _pw.text);
+      final next = u.needsProfile ? _profileRoute(u) : await landingAfterSignIn(ref);
+      ref.read(authProvider.notifier).signedIn(u, next: next);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      unawaited(HapticFeedback.heavyImpact());
+      setState(() => _error = s.error(e.code));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _forgot() async {
+    final s = ref.read(stringsProvider);
+    setState(() => _sending = true);
+    try {
+      await _sendCode(context, ref, widget.phone, OtpPurpose.reset);
+    } on ApiException catch (e) {
+      if (mounted) MkToast.show(context, s.error(e.code), kind: MkToastKind.error);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    final p = widget.phone;
+    return _StepScaffold(
+      title: s.tr('كلمة السر', 'Your password'),
+      body: s.tr('للرقم المنتهي بـ ${p.substring(p.length - 4)}', 'For the number ending ${p.substring(p.length - 4)}'),
+      onBack: () => context.pop(),
+      bottom: ListenableBuilder(
+        listenable: _pw,
+        builder: (context, _) => MkButton(
+          label: s.tr('فوت', 'Sign in'),
+          loading: _busy,
+          onPressed: _pw.text.isNotEmpty ? _signIn : null,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _pw,
+            autofocus: true,
+            obscureText: !_show,
+            autofillHints: const [AutofillHints.password],
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _signIn(),
+            decoration: InputDecoration(
+              hintText: s.tr('كلمة السر', 'Password'),
+              errorText: _error,
+              prefixIcon: const Icon(Icons.lock_outline_rounded),
+              suffixIcon: IconButton(
+                tooltip: _show ? s.tr('خبّي', 'Hide') : s.tr('بيّن', 'Show'),
+                onPressed: () => setState(() => _show = !_show),
+                icon: Icon(_show ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+              ),
+            ),
+          ),
+          const SizedBox(height: MkSpace.sm),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton.icon(
+              onPressed: _sending ? null : _forgot,
+              icon: _sending
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.help_outline_rounded, size: 18),
+              label: Text(s.tr('نسيت كلمة السر؟', 'Forgot password?'), style: t.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+            ),
+          ),
+          Text(
+            s.tr('منبعتلك رمز على واتساب وبتختار كلمة سر جديدة.', "We'll send you a WhatsApp code and you choose a new password."),
+            textAlign: TextAlign.end,
+            style: t.bodySmall?.copyWith(color: MkColors.ink3),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -601,7 +806,11 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     });
     try {
       final r = await ref.read(apiProvider).verifyOtp(_challenge.id, code);
-      final next = r.user.needsProfile ? _profileRoute(r.user) : await landingAfterSignIn(ref);
+      final after = r.user.needsProfile ? _profileRoute(r.user) : await landingAfterSignIn(ref);
+      final choose = widget.args.purpose == OtpPurpose.reset || r.needsPassword;
+      ref.read(passwordPassProvider.notifier).set(choose ? r.passwordToken : null);
+      final mode = widget.args.purpose == OtpPurpose.reset ? 'reset' : 'new';
+      final next = choose ? '/signup/password?mode=$mode&then=${Uri.encodeComponent(after)}' : after;
       ref.read(authProvider.notifier).signedIn(r.user, next: next);
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -634,8 +843,8 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
     final p = widget.args.phone;
     final last4 = p.length >= 4 ? p.substring(p.length - 4) : p;
     return _StepScaffold(
-      step: 2,
-      title: s.otpTitle,
+      step: widget.args.purpose == OtpPurpose.signUp ? 2 : null,
+      title: widget.args.purpose == OtpPurpose.reset ? s.tr('غيّر كلمة السر', 'Reset your password') : s.otpTitle,
       body: s.otpBody(last4),
       onBack: () => context.pop(),
       child: Column(
@@ -655,9 +864,181 @@ class _OtpScreenState extends ConsumerState<OtpScreen> {
           Center(
             child: _left > 0
                 ? Text(s.resendIn(_left), style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: MkColors.ink3))
-                : TextButton(onPressed: _resend, child: Text(s.resend)),
+                : TextButton(onPressed: _resend, child: Text(s.tr('ابعت الرمز على واتساب من جديد', 'Send the WhatsApp code again'))),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Choose a password: right after a WhatsApp code (new member, first time or
+/// "forgot password"), or from the account screen with the current one.
+class SetPasswordScreen extends ConsumerStatefulWidget {
+  const SetPasswordScreen({required this.mode, required this.then, super.key});
+
+  /// new | reset | change
+  final String mode;
+
+  /// Where to go once it is saved.
+  final String then;
+
+  @override
+  ConsumerState<SetPasswordScreen> createState() => _SetPasswordScreenState();
+}
+
+class _SetPasswordScreenState extends ConsumerState<SetPasswordScreen> {
+  final _current = TextEditingController();
+  final _pw = TextEditingController();
+  final _again = TextEditingController();
+  bool _show = false;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final c in [_current, _pw, _again]) {
+      c.addListener(() => setState(() {}));
+    }
+  }
+
+  @override
+  void dispose() {
+    _current.dispose();
+    _pw.dispose();
+    _again.dispose();
+    super.dispose();
+  }
+
+  bool get _change => widget.mode == 'change';
+  bool get _long => _pw.text.length >= 8;
+  bool get _letter => RegExp('[A-Za-z]').hasMatch(_pw.text);
+  bool get _digit => RegExp('[0-9]').hasMatch(_pw.text);
+  bool get _same => _pw.text.isNotEmpty && _pw.text == _again.text;
+  bool get _ready => _long && _letter && _digit && _same && (!_change || _current.text.isNotEmpty);
+
+  Future<void> _save() async {
+    if (!_ready || _busy) return;
+    final s = ref.read(stringsProvider);
+    setState(() => _busy = true);
+    try {
+      await ref.read(apiProvider).setPassword(
+            _pw.text,
+            passwordToken: _change ? null : ref.read(passwordPassProvider),
+            currentPassword: _change ? _current.text : null,
+          );
+      ref.read(passwordPassProvider.notifier).set(null);
+      final u = ref.read(authProvider).user;
+      if (u != null) {
+        ref.read(authProvider.notifier).updateUser(
+              AppUser(
+                id: u.id,
+                name: u.name,
+                phoneLast4: u.phoneLast4,
+                email: u.email,
+                gender: u.gender,
+                age: u.age,
+                signInMethod: u.signInMethod,
+                needsProfile: u.needsProfile,
+                hasPassword: true,
+              ),
+            );
+      }
+      if (!mounted) return;
+      MkToast.show(
+        context,
+        _change ? s.tr('تغيّرت كلمة السر', 'Password changed') : s.tr('انحفظت كلمة السر', 'Password saved'),
+        kind: MkToastKind.success,
+      );
+      context.go(widget.then);
+    } on ApiException catch (e) {
+      if (mounted) MkToast.show(context, s.error(e.code), kind: MkToastKind.error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    InputDecoration deco(String hint, IconData icon) => InputDecoration(
+          hintText: hint,
+          prefixIcon: Icon(icon),
+          suffixIcon: IconButton(
+            tooltip: _show ? s.tr('خبّي', 'Hide') : s.tr('بيّن', 'Show'),
+            onPressed: () => setState(() => _show = !_show),
+            icon: Icon(_show ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+          ),
+        );
+    Widget rule(bool ok, String label) => Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(
+            children: [
+              AnimatedSwitcher(
+                duration: MkMotion.fast,
+                child: Icon(
+                  ok ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                  key: ValueKey(ok),
+                  size: 18,
+                  color: ok ? MkColors.success : MkColors.ink3,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(label, style: t.bodySmall?.copyWith(color: ok ? MkColors.ink : MkColors.ink3, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        );
+    return PopScope(
+      // After a WhatsApp code the member is signed in; choosing the password is the way forward.
+      canPop: _change,
+      child: _StepScaffold(
+        title: switch (widget.mode) {
+          'reset' => s.tr('كلمة سر جديدة', 'Choose a new password'),
+          'change' => s.tr('غيّر كلمة السر', 'Change password'),
+          _ => s.tr('اختار كلمة سر', 'Create a password'),
+        },
+        body: s.tr(
+          'إذا طلعت من الحساب، بتفوت برقمك وكلمة السر. إذا نسيتها، منبعتلك رمز على واتساب.',
+          'If you sign out, you come back with your number and this password. Forgot it? We send a WhatsApp code.',
+        ),
+        onBack: _change ? () => context.pop() : null,
+        bottom: MkButton(label: s.tr('احفظ كلمة السر', 'Save password'), loading: _busy, onPressed: _ready ? _save : null),
+        child: AutofillGroup(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_change) ...[
+                TextField(
+                  controller: _current,
+                  obscureText: !_show,
+                  autofillHints: const [AutofillHints.password],
+                  decoration: deco(s.tr('كلمة السر الحالية', 'Current password'), Icons.lock_clock_outlined),
+                ),
+                const SizedBox(height: MkSpace.sm),
+              ],
+              TextField(
+                controller: _pw,
+                autofocus: !_change,
+                obscureText: !_show,
+                autofillHints: const [AutofillHints.newPassword],
+                decoration: deco(s.tr('كلمة السر', 'Password'), Icons.lock_outline_rounded),
+              ),
+              const SizedBox(height: MkSpace.sm),
+              TextField(
+                controller: _again,
+                obscureText: !_show,
+                autofillHints: const [AutofillHints.newPassword],
+                onSubmitted: (_) => _save(),
+                decoration: deco(s.tr('أعد كتابتها', 'Type it again'), Icons.lock_reset_rounded),
+              ),
+              const SizedBox(height: MkSpace.sm),
+              rule(_long, s.tr('٨ أحرف أو أكتر', '8 characters or more')),
+              rule(_letter && _digit, s.tr('أحرف وأرقام', 'Letters and numbers')),
+              rule(_same, s.tr('الكلمتين متل بعض', 'Both match')),
+            ],
+          ),
+        ),
       ),
     );
   }

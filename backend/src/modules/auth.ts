@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Body, Controller, HttpCode, Inject, Module, Post } from '@nestjs/common';
+import { hash, verify as verifyHash } from '@node-rs/argon2';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { audit } from '../platform/audit.js';
@@ -11,7 +12,7 @@ import { verifyGoogleIdToken } from '../platform/google.js';
 import { parse } from '../platform/validation.js';
 import { LedgerService } from './ledger.js';
 import { grantRule } from './mukafaah.js';
-import { ConsoleOtpProvider, OTP_PROVIDER, type OtpProvider } from './otp-provider.js';
+import { OTP_PROVIDER, otpProviderFactory, type OtpProvider } from './otp-provider.js';
 
 const OTP_TTL_SEC = 300;
 const OTP_MAX_ATTEMPTS = 5;
@@ -20,6 +21,11 @@ const OTP_MAX_PER_PHONE_DAY = 10;
 const OTP_MAX_PER_IP_HOUR = 20;
 const OTP_MAX_PER_DEVICE_HOUR = 10;
 const ACCESS_TTL = '15m';
+const PASSWORD_MAX_FAILURES = 5;
+const PASSWORD_LOCK_MINUTES = 15;
+const CHECKS_PER_IP_HOUR = 40;
+const PASSWORD_TRIES_PER_IP_HOUR = 30;
+const PWSET_TTL = '15m';
 const REFRESH_TTL_DAYS = 30;
 
 const zApp = z.enum(['CUSTOMER', 'BUSINESS', 'ADMIN']);
@@ -44,9 +50,30 @@ const zGoogle = z.strictObject({
   locale: z.enum(['ar', 'en']).default('ar'),
 });
 
+const zPhoneCheck = z.strictObject({ phone: z.string().min(6).max(20) });
+const zPasswordLogin = z.strictObject({
+  phone: z.string().min(6).max(20),
+  password: z.string().min(1).max(200),
+  app: z.literal('CUSTOMER'),
+  deviceLabel: z.string().max(80).optional(),
+});
+export const zNewPassword = z
+  .string()
+  .min(8, 'At least 8 characters')
+  .max(72)
+  .regex(/[A-Za-z]/, 'Add at least one letter')
+  .regex(/[0-9]/, 'Add at least one number');
+const zSetPassword = z.strictObject({
+  password: zNewPassword,
+  /** From the WhatsApp code step (sign-up, first sign-in, forgot password). */
+  passwordToken: z.string().min(20).max(2000).optional(),
+  /** When changing a password from the account screen. */
+  currentPassword: z.string().min(1).max(200).optional(),
+});
+
 /** What the apps need to know about the member right after signing in. */
 function signedInUser(u: Record<string, any>) {
-  return { id: u.id, name: u.name, phoneLast4: u.phone_last4 ?? null, email: u.email ?? null };
+  return { id: u.id, name: u.name, phoneLast4: u.phone_last4 ?? null, email: u.email ?? null, hasPassword: !!u.password_hash };
 }
 
 @Controller('v1/auth')
@@ -107,6 +134,8 @@ export class AuthController {
     const nextCooldown = Math.min(30 * 2 ** hour, 600);
     return {
       challengeId,
+      // Codes go to WhatsApp.
+      channel: this.otp.channel,
       expiresInSec: OTP_TTL_SEC,
       resendInSec: nextCooldown,
       ...(config.OTP_DEV_ECHO ? { devCode: code } : {}),
@@ -171,7 +200,16 @@ export class AuthController {
       }
       const tokens = await this.createSession(c, user.id, b.app, b.deviceLabel ?? null, null);
       await audit(c, { actorType: 'USER', actorId: user.id, action: 'auth.login', data: { app: b.app }, ip });
-      return { ...tokens, isNew, needsProfile: !user.profile_completed_at, user: signedInUser(user) };
+      // The code proves the phone is theirs, so they may choose a (new) password now.
+      const { token: passwordToken } = await this.crypto.sign('pwset', user.id, {}, PWSET_TTL);
+      return {
+        ...tokens,
+        isNew,
+        needsProfile: !user.profile_completed_at,
+        needsPassword: b.app === 'CUSTOMER' && !user.password_hash,
+        passwordToken,
+        user: signedInUser(user),
+      };
     });
     if (!out) throw new AppError(400, 'OTP_INVALID', 'Code is wrong or expired');
     return out;
@@ -213,6 +251,109 @@ export class AuthController {
         user: signedInUser(user),
       };
     });
+  }
+
+  /**
+   * Before signing in with a phone: is it already a member, and do they have
+   * a password? New numbers and members without a password get a WhatsApp code.
+   */
+  @Post('phone/check')
+  @HttpCode(200)
+  async phoneCheck(@Body() body: unknown, @ClientIp() ip: string) {
+    const b = parse(zPhoneCheck, body);
+    const phone = this.crypto.normalizePhone(b.phone);
+    const ph = this.crypto.phoneHash(phone);
+    const n = await this.db.one(
+      `SELECT count(*)::int AS n FROM login_attempts WHERE kind = 'CHECK' AND ip = $1 AND created_at > now() - interval '1 hour'`,
+      [ip],
+    );
+    if ((n?.n ?? 0) >= CHECKS_PER_IP_HOUR) throw Errors.tooMany('CHECK_LIMIT');
+    const u = await this.db.one(`SELECT status, password_hash FROM users WHERE phone_hash = $1`, [ph]);
+    await this.db.query(`INSERT INTO login_attempts(kind, ip, phone_hash, ok) VALUES ('CHECK', $1, $2, $3)`, [ip, ph, !!u]);
+    return { exists: !!u && u.status === 'ACTIVE', hasPassword: !!u?.password_hash, channel: this.otp.channel };
+  }
+
+  /** Members who signed out come back with their phone and password. */
+  @Post('password/login')
+  @HttpCode(200)
+  async passwordLogin(@Body() body: unknown, @ClientIp() ip: string) {
+    const b = parse(zPasswordLogin, body);
+    const phone = this.crypto.normalizePhone(b.phone);
+    const ph = this.crypto.phoneHash(phone);
+    const wrong = new AppError(401, 'LOGIN_INVALID', 'Wrong phone number or password');
+    const tries = await this.db.one(
+      `SELECT count(*)::int AS n FROM login_attempts WHERE kind = 'PASSWORD' AND NOT ok AND ip = $1 AND created_at > now() - interval '1 hour'`,
+      [ip],
+    );
+    if ((tries?.n ?? 0) >= PASSWORD_TRIES_PER_IP_HOUR) throw Errors.tooMany('LOGIN_LIMIT_IP');
+    const u = await this.db.one(`SELECT * FROM users WHERE phone_hash = $1`, [ph]);
+    const fail = async () => {
+      await this.db.query(`INSERT INTO login_attempts(kind, ip, phone_hash, ok) VALUES ('PASSWORD', $1, $2, false)`, [ip, ph]);
+      return wrong;
+    };
+    if (!u || !u.password_hash) {
+      // Same work as a real check so timing does not reveal who has a password.
+      await hash(b.password).catch(() => undefined);
+      throw await fail();
+    }
+    if (u.status !== 'ACTIVE') throw Errors.forbidden();
+    if (u.password_locked_until && new Date(u.password_locked_until) > new Date()) {
+      throw new AppError(423, 'LOGIN_LOCKED', 'Too many wrong passwords. Try again in 15 minutes, or reset it with a WhatsApp code.');
+    }
+    const ok = await verifyHash(u.password_hash, b.password).catch(() => false);
+    if (!ok) {
+      await this.db.query(
+        `UPDATE users SET password_failures = password_failures + 1,
+                password_locked_until = CASE WHEN password_failures + 1 >= $2 THEN now() + make_interval(mins => $3) ELSE password_locked_until END
+          WHERE id = $1`,
+        [u.id, PASSWORD_MAX_FAILURES, PASSWORD_LOCK_MINUTES],
+      );
+      throw await fail();
+    }
+    return this.db.tx(async (c) => {
+      await c.query(`UPDATE users SET password_failures = 0, password_locked_until = NULL WHERE id = $1`, [u.id]);
+      await c.query(`INSERT INTO login_attempts(kind, ip, phone_hash, ok) VALUES ('PASSWORD', $1, $2, true)`, [ip, ph]);
+      const tokens = await this.createSession(c, u.id, b.app, b.deviceLabel ?? null, null);
+      await audit(c, { actorType: 'USER', actorId: u.id, action: 'auth.login', data: { app: b.app, method: 'PASSWORD' }, ip });
+      return { ...tokens, isNew: false, needsProfile: !u.profile_completed_at, needsPassword: false, user: signedInUser(u) };
+    });
+  }
+
+  /**
+   * Choose a password. Right after a WhatsApp code (sign-up, first sign-in or
+   * "forgot password") the passwordToken from that step is enough; otherwise
+   * the current password is needed.
+   */
+  @Post('password')
+  @HttpCode(200)
+  @RequireUser()
+  async setPassword(@Auth() auth: UserAuth, @Body() body: unknown, @ClientIp() ip: string) {
+    const b = parse(zSetPassword, body);
+    const u = await this.db.one(`SELECT id, password_hash FROM users WHERE id = $1`, [auth.userId]);
+    if (!u) throw Errors.unauthorized();
+    let allowed = false;
+    if (b.passwordToken) {
+      const p = await this.crypto.verify('pwset', b.passwordToken).catch(() => null);
+      allowed = p?.sub === auth.userId;
+    }
+    if (!allowed && b.currentPassword && u.password_hash) {
+      allowed = await verifyHash(u.password_hash, b.currentPassword).catch(() => false);
+    }
+    if (!allowed && !u.password_hash && !b.passwordToken) {
+      throw new AppError(403, 'PASSWORD_CODE_NEEDED', 'Confirm with a WhatsApp code first');
+    }
+    if (!allowed) throw new AppError(403, 'PASSWORD_WRONG', 'Current password is wrong');
+    await this.db.tx(async (c) => {
+      await c.query(
+        `UPDATE users SET password_hash = $2, password_set_at = now(), password_failures = 0, password_locked_until = NULL, updated_at = now()
+          WHERE id = $1`,
+        [u.id, await hash(b.password)],
+      );
+      // A new password signs out every other phone.
+      await c.query(`UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL`, [u.id, auth.sessionId]);
+      await audit(c, { actorType: 'USER', actorId: u.id, action: u.password_hash ? 'auth.password.change' : 'auth.password.set', ip });
+    });
+    return { ok: true };
   }
 
   @Post('refresh')
@@ -266,6 +407,6 @@ export class AuthController {
 
 @Module({
   controllers: [AuthController],
-  providers: [{ provide: OTP_PROVIDER, useClass: ConsoleOtpProvider }],
+  providers: [{ provide: OTP_PROVIDER, useFactory: otpProviderFactory }],
 })
 export class AuthModule {}

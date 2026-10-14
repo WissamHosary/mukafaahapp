@@ -12,6 +12,7 @@ class AppUser {
     this.age,
     this.signInMethod = 'PHONE',
     this.needsProfile = false,
+    this.hasPassword = false,
   });
   factory AppUser.fromJson(Map<String, dynamic> j, {bool? needsProfile}) => AppUser(
         id: j['id'] as String,
@@ -22,6 +23,7 @@ class AppUser {
         age: (j['age'] as num?)?.toInt(),
         signInMethod: j['signInMethod'] as String? ?? (j['email'] != null && j['phoneLast4'] == null ? 'GOOGLE' : 'PHONE'),
         needsProfile: needsProfile ?? j['needsProfile'] as bool? ?? false,
+        hasPassword: j['hasPassword'] as bool? ?? false,
       );
   final String id;
   final String? name;
@@ -40,7 +42,26 @@ class AppUser {
   /// True until the member finishes the sign-up profile.
   final bool needsProfile;
 
+  /// Phone members sign back in with their number and this password.
+  final bool hasPassword;
+
   bool get isGoogle => signInMethod == 'GOOGLE';
+}
+
+/// What the phone screen learns before deciding: password or WhatsApp code.
+class PhoneStatus {
+  const PhoneStatus({required this.exists, required this.hasPassword});
+  final bool exists;
+  final bool hasPassword;
+}
+
+/// Result of a WhatsApp code: signed in, plus a short pass to choose a password.
+class OtpResult {
+  const OtpResult({required this.user, required this.isNew, required this.needsPassword, this.passwordToken});
+  final AppUser user;
+  final bool isNew;
+  final bool needsPassword;
+  final String? passwordToken;
 }
 
 class OtpChallenge {
@@ -150,6 +171,7 @@ class ShopCard {
     required this.programId,
     required this.programType,
     required this.earnPercent,
+    this.pointsPerDollar = 100,
     required this.rating,
     required this.ratingCount,
     required this.myPoints,
@@ -172,6 +194,7 @@ class ShopCard {
         programId: j['programId'] as String,
         programType: j['programType'] as String,
         earnPercent: _d(j['earnPercent']),
+        pointsPerDollar: (j['pointsPerDollar'] as num?)?.toInt() ?? 100,
         rating: _d(j['rating']),
         ratingCount: _i(j['ratingCount']),
         myPoints: _i(j['myPoints']),
@@ -193,6 +216,9 @@ class ShopCard {
   final String programId;
   final String programType;
   final double earnPercent;
+
+  /// Points worth \$1 at this shop.
+  final int pointsPerDollar;
   final double rating;
   final int ratingCount;
   final int myPoints;
@@ -482,10 +508,26 @@ class ShopDetail {
     this.instagram,
     this.storeEnabled = false,
     this.myStars,
+    this.myComment,
+    this.social = const ShopSocial(),
+    this.hours,
+    this.banners = const [],
+    this.reviews = const [],
+    this.starCounts = const [0, 0, 0, 0, 0],
   });
   factory ShopDetail.fromJson(Json j) => ShopDetail(
         card: ShopCard.fromJson(j),
         instagram: _s(j['instagram']),
+        social: ShopSocial.fromJson((j['social'] as Map?)?.cast<String, dynamic>() ?? {'instagram': j['instagram']}),
+        hours: _s(j['hours']),
+        banners: ((j['banners'] as List?) ?? const [])
+            .map((e) => (url: (e as Map)['url'] as String?, caption: _s(e['caption'])))
+            .where((b) => b.url != null)
+            .map((b) => ShopBanner(url: b.url!, caption: b.caption))
+            .toList(),
+        reviews: ((j['reviews'] as List?) ?? const []).map((e) => ShopReview.fromJson(e as Json)).toList(),
+        starCounts: ((j['starCounts'] as List?) ?? const [0, 0, 0, 0, 0]).map((e) => (e as num).toInt()).toList(),
+        myComment: _s((j['myRating'] as Map?)?['comment']),
         storeEnabled: j['storeEnabled'] == true,
         branches: ((j['branches'] as List?) ?? const []).map((e) => e.toString()).toList(),
         offers: ((j['offers'] as List?) ?? const []).map((e) => Offer.fromJson(e as Json)).toList(),
@@ -504,7 +546,57 @@ class ShopDetail {
   final List<Reward> rewards;
   final List<Product> products;
   final int? myStars;
+  final String? myComment;
   final bool canRate;
+  final ShopSocial social;
+  final String? hours;
+  final List<ShopBanner> banners;
+  final List<ShopReview> reviews;
+
+  /// How many reviews gave 1, 2, 3, 4 and 5 stars.
+  final List<int> starCounts;
+}
+
+class ShopSocial {
+  const ShopSocial({this.instagram, this.facebook, this.tiktok, this.website, this.whatsapp, this.phone});
+  factory ShopSocial.fromJson(Json j) => ShopSocial(
+        instagram: _s(j['instagram']),
+        facebook: _s(j['facebook']),
+        tiktok: _s(j['tiktok']),
+        website: _s(j['website']),
+        whatsapp: _s(j['whatsapp']),
+        phone: _s(j['phone']),
+      );
+  final String? instagram;
+  final String? facebook;
+  final String? tiktok;
+  final String? website;
+  final String? whatsapp;
+  final String? phone;
+
+  bool get isEmpty => [instagram, facebook, tiktok, website, whatsapp, phone].every((x) => x == null || x.isEmpty);
+}
+
+class ShopBanner {
+  const ShopBanner({required this.url, this.caption});
+  final String url;
+  final String? caption;
+}
+
+class ShopReview {
+  const ShopReview({required this.name, required this.stars, required this.at, this.comment, this.mine = false});
+  factory ShopReview.fromJson(Json j) => ShopReview(
+        name: j['name'] as String? ?? '',
+        stars: (j['stars'] as num).toInt(),
+        comment: _s(j['comment']),
+        at: DateTime.tryParse(j['at'] as String? ?? '') ?? DateTime.now(),
+        mine: j['mine'] == true,
+      );
+  final String name;
+  final int stars;
+  final String? comment;
+  final DateTime at;
+  final bool mine;
 }
 
 class ActivityItem {
@@ -1058,18 +1150,47 @@ class CustomerApi {
     );
   }
 
-  Future<({AppUser user, bool isNew})> verifyOtp(String challengeId, String code) async {
+  Future<OtpResult> verifyOtp(String challengeId, String code) async {
     final d = await client.post<Map<String, dynamic>>(
       '/v1/auth/otp/verify',
       auth: false,
       data: {'challengeId': challengeId, 'code': code, 'app': 'CUSTOMER', 'deviceLabel': 'Mukafaah app'},
     );
     await client.store.saveTokens(access: d['accessToken'] as String, refresh: d['refreshToken'] as String);
-    return (
+    return OtpResult(
       user: AppUser.fromJson(d['user'] as Map<String, dynamic>, needsProfile: d['needsProfile'] as bool? ?? false),
       isNew: d['isNew'] as bool,
+      needsPassword: d['needsPassword'] as bool? ?? false,
+      passwordToken: d['passwordToken'] as String?,
     );
   }
+
+  /// Is this number already a member, and do they have a password?
+  Future<PhoneStatus> checkPhone(String phone) async {
+    final d = await client.post<Map<String, dynamic>>('/v1/auth/phone/check', auth: false, data: {'phone': phone});
+    return PhoneStatus(exists: d['exists'] as bool? ?? false, hasPassword: d['hasPassword'] as bool? ?? false);
+  }
+
+  /// Members who signed out come back with their phone number and password.
+  Future<AppUser> signInWithPassword(String phone, String password) async {
+    final d = await client.post<Map<String, dynamic>>(
+      '/v1/auth/password/login',
+      auth: false,
+      data: {'phone': phone, 'password': password, 'app': 'CUSTOMER', 'deviceLabel': 'Mukafaah app'},
+    );
+    await client.store.saveTokens(access: d['accessToken'] as String, refresh: d['refreshToken'] as String);
+    return AppUser.fromJson(d['user'] as Map<String, dynamic>, needsProfile: d['needsProfile'] as bool? ?? false);
+  }
+
+  /// Choose a password: after a WhatsApp code ([passwordToken]) or with the current one.
+  Future<void> setPassword(String password, {String? passwordToken, String? currentPassword}) => client.post<Json>(
+        '/v1/auth/password',
+        data: {
+          'password': password,
+          if (passwordToken != null) 'passwordToken': passwordToken,
+          if (currentPassword != null) 'currentPassword': currentPassword,
+        },
+      );
 
   /// Signs in with the ID token Google gave the app. The server checks it with Google.
   Future<({AppUser user, bool isNew, String? suggestedName})> signInWithGoogle(String idToken, String locale) async {
@@ -1217,7 +1338,10 @@ class CustomerApi {
 
   Future<ShopDetail> shop(String id) async => ShopDetail.fromJson(await client.get<Json>('/v1/customer/shops/$id'));
 
-  Future<void> rate(String shopId, int stars) => client.put<Json>('/v1/customer/shops/$shopId/rating', data: {'stars': stars});
+  Future<void> rate(String shopId, int stars, {String? comment}) => client.put<Json>(
+        '/v1/customer/shops/$shopId/rating',
+        data: {'stars': stars, if (comment != null && comment.trim().isNotEmpty) 'comment': comment.trim()},
+      );
 
   /// Places near the member come first (isNear), then every other offer in Mukafaah.
   Future<List<Offer>> offers({String? category, double? lat, double? lng}) async {

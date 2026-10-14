@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app/providers.dart';
 import '../../data/api.dart';
 import '../common/common.dart';
+import '../common/map_style.dart';
 
 /// Shops within this distance of the customer keep the brand colour; farther ones are muted.
 const double kNearKm = 5;
@@ -179,11 +180,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
               onTap: (_, _) => setState(() => _selectedId = null),
             ),
             children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'app.mukafaah.mukafaah_customer',
-                maxNativeZoom: 19,
-              ),
+              mukafaahTiles(),
               if (_me != null)
                 CircleLayer(
                   circles: [
@@ -225,6 +222,19 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                 attributions: [TextSourceAttribution('OpenStreetMap contributors')],
               ),
             ],
+          ),
+          // Soft fade under the status bar and search.
+          IgnorePointer(
+            child: Container(
+              height: top + 130,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xCCFAF8FC), Color(0x00FAF8FC)],
+                ),
+              ),
+            ),
           ),
           // Search and filters over the map.
           Positioned(
@@ -677,46 +687,109 @@ class _LocationCard extends StatelessWidget {
       _Loc.serviceOff => s.tr('شغّل الموقع بالإعدادات لتشوف المسافات.', 'Turn it on in Settings to see distances.'),
       _Loc.deniedForever => s.tr('اسمح بالموقع لمكافأة من الإعدادات.', 'Allow location for Mukafaah in Settings.'),
       _Loc.denied => s.tr('منستعمله بس لنرتّب المحلات حسب المسافة.', 'We only use it to sort shops by distance.'),
-      _ => s.tr('اسمح بالموقع لتلاقي أقرب المحلات.', 'Allow location to find the closest shops.'),
+      _ => s.tr('أقرب المحلات أول، والمسافة لكل محل.', 'Closest shops first, with the distance to each.'),
     };
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: MkRadius.all(MkRadius.lg),
-        boxShadow: const [BoxShadow(color: Color(0x332C123F), blurRadius: 24, offset: Offset(0, 8))],
+    return ClipRRect(
+      borderRadius: MkRadius.all(22),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [MkColors.purple700, MkColors.purple900],
+          ),
+          boxShadow: [BoxShadow(color: Color(0x552C123F), blurRadius: 24, offset: Offset(0, 10))],
+        ),
+        child: Row(
+          children: [
+            _Radar(off: off),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title, style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800, color: Colors.white)),
+                  const SizedBox(height: 2),
+                  Text(body, maxLines: 2, overflow: TextOverflow.ellipsis, style: t.labelSmall?.copyWith(color: Colors.white70)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: off ? onSettings : onAllow,
+              style: FilledButton.styleFrom(
+                backgroundColor: MkColors.yellow500,
+                foregroundColor: MkColors.purple900,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                textStyle: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              child: Text(off ? s.tr('الإعدادات', 'Settings') : s.tr('اسمح', 'Allow')),
+            ),
+          ],
+        ),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(color: const Color(0xFFDBEAFE), borderRadius: MkRadius.all(MkRadius.md)),
-            child: Icon(off ? Icons.location_off_rounded : Icons.my_location_rounded, color: const Color(0xFF2563EB)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(title, style: t.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                Text(body, maxLines: 2, overflow: TextOverflow.ellipsis, style: t.labelSmall?.copyWith(color: MkColors.ink3)),
-              ],
+    );
+  }
+}
+
+/// A location icon with radar waves going out.
+class _Radar extends StatefulWidget {
+  const _Radar({required this.off});
+  final bool off;
+
+  @override
+  State<_Radar> createState() => _RadarState();
+}
+
+class _RadarState extends State<_Radar> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200));
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context) || widget.off) {
+      _c.stop();
+    } else if (!_c.isAnimating) {
+      _c.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 46,
+      height: 46,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) => Stack(
+          alignment: Alignment.center,
+          children: [
+            for (final k in [0.0, 0.5])
+              Opacity(
+                opacity: (1 - ((_c.value + k) % 1)) * 0.6,
+                child: Container(
+                  width: 20 + 26 * ((_c.value + k) % 1),
+                  height: 20 + 26 * ((_c.value + k) % 1),
+                  decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: MkColors.yellow500, width: 2)),
+                ),
+              ),
+            Container(
+              width: 30,
+              height: 30,
+              decoration: const BoxDecoration(color: MkColors.yellow500, shape: BoxShape.circle),
+              child: Icon(widget.off ? Icons.location_off_rounded : Icons.my_location_rounded, color: MkColors.purple900, size: 18),
             ),
-          ),
-          const SizedBox(width: 6),
-          FilledButton(
-            onPressed: off ? onSettings : onAllow,
-            style: FilledButton.styleFrom(
-              backgroundColor: MkColors.yellow500,
-              foregroundColor: MkColors.purple900,
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-            ),
-            child: Text(off ? s.tr('الإعدادات', 'Settings') : s.tr('اسمح', 'Allow')),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

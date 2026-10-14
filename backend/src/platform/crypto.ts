@@ -35,7 +35,8 @@ interface KeyFile {
 
 type JoseKey = Awaited<ReturnType<typeof importJWK>>;
 
-export type Audience = 'user' | 'staff' | 'qr';
+/** pwset: a short-lived pass to choose a new password after a WhatsApp code. */
+export type Audience = 'user' | 'staff' | 'qr' | 'pwset';
 
 /**
  * Key material and crypto helpers. In development keys are generated once and

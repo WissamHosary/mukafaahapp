@@ -10,7 +10,7 @@ import { createOwnerLogin, createWorker, zPassword, zUsername, zWorker } from '.
 import { LedgerService } from './ledger.js';
 import { MerchantController } from './merchant.js';
 import { OwnerController, createShop } from './owner.js';
-import { earnPercent, getSetting } from './shared.js';
+import { earnPercent, getSetting, prettyPhone } from './shared.js';
 import { StoreOwnerController } from './store.js';
 
 /*
@@ -143,7 +143,7 @@ export class AdminShopsController {
       this.merchant.profile(o),
       this.owner.me(o),
       this.db.one(
-        `SELECT u.name, u.phone_last4, b.status, b.created_at, b.store_enabled, b.admin_note, b.featured_sort
+        `SELECT u.name, u.phone_last4, u.phone_enc, b.status, b.created_at, b.store_enabled, b.admin_note, b.featured_sort
            FROM businesses b JOIN users u ON u.id = b.owner_user_id WHERE b.id = $1`,
         [o.businessId],
       ),
@@ -155,7 +155,7 @@ export class AdminShopsController {
       storeEnabled: !!owner?.store_enabled,
       adminNote: owner?.admin_note ?? null,
       featuredSort: owner?.featured_sort ?? 0,
-      owner: { name: owner?.name ?? null, phone: `•••• ${owner?.phone_last4 ?? ''}` },
+      owner: { name: owner?.name ?? null, phone: owner?.phone_enc ? prettyPhone(this.crypto.decrypt(owner.phone_enc)) : '' },
       branches: me.branches,
       minBillMinor: me.earningProgram.minBillMinor,
     };
@@ -164,6 +164,57 @@ export class AdminShopsController {
   @Patch('shops/:id/profile')
   async profile(@Auth() a: AdminAuth, @Param('id') id: string, @Body() body: unknown, @ClientIp() ip: string) {
     return this.merchant.updateProfile(await this.as(a, id), body, ip);
+  }
+
+  @Post('shops/:id/banners')
+  async addBanner(@Auth() a: AdminAuth, @Param('id') id: string, @Body() body: unknown) {
+    return this.merchant.addBanner(await this.as(a, id), body);
+  }
+
+  @Delete('shops/:id/banners/:bannerId')
+  async deleteBanner(@Auth() a: AdminAuth, @Param('id') id: string, @Param('bannerId') bannerId: string) {
+    return this.merchant.deleteBanner(await this.as(a, id), bannerId);
+  }
+
+  @Put('shops/:id/banners/order')
+  async orderBanners(@Auth() a: AdminAuth, @Param('id') id: string, @Body() body: unknown) {
+    return this.merchant.orderBanners(await this.as(a, id), body);
+  }
+
+  /** Customer reviews of this shop; Mukafaah can hide one that breaks the rules. */
+  @Get('shops/:id/reviews')
+  async reviews(@Auth() a: AdminAuth, @Param('id') id: string) {
+    const o = await this.as(a, id);
+    const r = await this.db.query(
+      `SELECT r.user_id, r.stars, r.comment, r.hidden, r.updated_at, u.name
+         FROM business_ratings r JOIN users u ON u.id = r.user_id
+        WHERE r.business_id = $1 ORDER BY r.updated_at DESC LIMIT 300`,
+      [o.businessId],
+    );
+    return r.rows.map((x) => ({
+      userId: x.user_id,
+      name: x.name ?? null,
+      stars: Number(x.stars),
+      comment: x.comment ?? null,
+      hidden: !!x.hidden,
+      at: x.updated_at,
+    }));
+  }
+
+  @Patch('shops/:id/reviews/:userId')
+  async hideReview(@Auth() a: AdminAuth, @Param('id') id: string, @Param('userId') userId: string, @Body() body: unknown, @ClientIp() ip: string) {
+    const o = await this.as(a, id);
+    const b = parse(z.strictObject({ hidden: z.boolean() }), body);
+    const r = await this.db.query(`UPDATE business_ratings SET hidden = $3 WHERE business_id = $1 AND user_id = $2`, [
+      o.businessId,
+      parse(zUuid, userId),
+      b.hidden,
+    ]);
+    if (!r.rowCount) throw Errors.notFound('Review');
+    await this.db.tx((c) =>
+      audit(c, { actorType: 'USER', actorId: a.userId, businessId: o.businessId, action: b.hidden ? 'admin.review.hide' : 'admin.review.show', ip }),
+    );
+    return { ok: true };
   }
 
   /** purpose: logo | cover (applied right away) or item (for offers, rewards, products). */

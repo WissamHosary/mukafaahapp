@@ -323,6 +323,13 @@ class AccountScreen extends ConsumerWidget {
             child: Column(
               children: [
                 const _QuickUnlockTile(),
+                if (!(user?.isGoogle ?? false))
+                  tile(
+                    Icons.password_rounded,
+                    (user?.hasPassword ?? false) ? s.tr('غيّر كلمة السر', 'Change password') : s.tr('اختار كلمة سر', 'Create a password'),
+                    () => context.push('/signup/password?mode=${(user?.hasPassword ?? false) ? 'change' : 'new'}&then=/profile'),
+                    sub: s.tr('لترجع تفوت برقمك وكلمة السر', 'To sign back in with your number and password'),
+                  ),
                 tile(Icons.logout_rounded, s.logout, () => _logout(ref)),
                 tile(Icons.devices_rounded, s.logoutAll, () => _logout(ref, all: true), color: MkColors.danger),
               ],

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Module, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Module, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { audit } from '../platform/audit.js';
 import { Auth, ClientIp, RequireOwner, type OwnerAuth } from '../platform/auth.js';
@@ -23,7 +23,15 @@ const zProfile = z.strictObject({
   lng: z.number().min(-180).max(180).nullable().optional(),
   listed: z.boolean().optional(),
   allowTransfer: z.boolean().optional(),
+  facebook: z.string().trim().max(120).nullable().optional(),
+  tiktok: z.string().trim().max(60).nullable().optional(),
+  website: z.string().trim().max(200).regex(/^https?:\/\/\S+$/, 'Start the website with https://').nullable().optional(),
+  phone: z.string().trim().regex(/^\+?[0-9 ]{7,20}$/).nullable().optional(),
+  hours: z.string().trim().max(120).nullable().optional(),
 });
+const zBanner = z.strictObject({ dataBase64: z.string().min(20).max(4_500_000), caption: z.string().trim().max(80).nullable().optional() });
+const zBannerOrder = z.strictObject({ ids: z.array(zUuid).max(10) });
+const MAX_BANNERS = 10;
 const zUpload = z.strictObject({ purpose: z.enum(['logo', 'cover', 'item']), dataBase64: zImage });
 
 const offerFields = {
@@ -120,6 +128,14 @@ export class MerchantController {
       city: b.city ?? null,
       lat: b.lat ?? null,
       lng: b.lng ?? null,
+      facebook: b.facebook ?? null,
+      tiktok: b.tiktok ?? null,
+      website: b.website ?? null,
+      phone: b.phone ?? null,
+      hours: b.hours ?? null,
+      banners: (
+        await this.db.query(`SELECT id, media_id, caption FROM business_banners WHERE business_id = $1 ORDER BY sort, created_at`, [b.id])
+      ).rows.map((x) => ({ id: x.id, url: mediaUrl(x.media_id), caption: x.caption ?? null })),
       listed: b.listed,
       featured: b.featured,
       logoUrl: mediaUrl(b.logo_media_id),
@@ -147,6 +163,11 @@ export class MerchantController {
           lat: b.lat,
           lng: b.lng,
           listed: b.listed,
+          facebook: b.facebook,
+          tiktok: b.tiktok?.replace(/^@/, ''),
+          website: b.website,
+          phone: b.phone,
+          hours: b.hours,
         },
         2,
       );
@@ -164,6 +185,42 @@ export class MerchantController {
       await audit(c, { actorType: 'OWNER', actorId: a.userId, businessId: a.businessId, action: 'business.profile', data: b, ip });
     });
     return this.profile(a);
+  }
+
+  // ---------- Banners: pictures that slide at the top of the shop page ----------
+  @Post('banners')
+  async addBanner(@Auth() a: OwnerAuth, @Body() body: unknown) {
+    const b = parse(zBanner, body);
+    return this.db.tx(async (c) => {
+      const n = (await c.query(`SELECT count(*)::int AS n FROM business_banners WHERE business_id = $1`, [a.businessId])).rows[0].n;
+      if (n >= MAX_BANNERS) throw new AppError(409, 'BANNERS_FULL', `Up to ${MAX_BANNERS} banners`);
+      const mediaId = await saveImage(c, a.businessId, b.dataBase64);
+      const row = (
+        await c.query(
+          `INSERT INTO business_banners(business_id, media_id, caption, sort) VALUES ($1,$2,$3,$4) RETURNING id`,
+          [a.businessId, mediaId, b.caption ?? null, n],
+        )
+      ).rows[0];
+      return { id: row.id, url: mediaUrl(mediaId), caption: b.caption ?? null };
+    });
+  }
+
+  @Delete('banners/:bannerId')
+  async deleteBanner(@Auth() a: OwnerAuth, @Param('bannerId') id: string) {
+    const r = await this.db.query(`DELETE FROM business_banners WHERE id = $1 AND business_id = $2`, [parse(zUuid, id), a.businessId]);
+    if (!r.rowCount) throw Errors.notFound('Banner');
+    return { ok: true };
+  }
+
+  @Put('banners/order')
+  async orderBanners(@Auth() a: OwnerAuth, @Body() body: unknown) {
+    const b = parse(zBannerOrder, body);
+    await this.db.tx(async (c) => {
+      for (const [i, id] of b.ids.entries()) {
+        await c.query(`UPDATE business_banners SET sort = $3 WHERE id = $1 AND business_id = $2`, [id, a.businessId, i]);
+      }
+    });
+    return { ok: true };
   }
 
   /** Upload an image. Logo and cover are applied to the shop right away. */

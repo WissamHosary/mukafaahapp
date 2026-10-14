@@ -40,7 +40,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     ..listen(authProvider, (_, next) => status.value = next.status)
     ..onDispose(status.dispose);
 
-  const publicPaths = {'/welcome', '/phone', '/otp'};
+  const publicPaths = {'/welcome', '/phone', '/otp', '/password'};
 
   return GoRouter(
     initialLocation: '/splash',
@@ -61,7 +61,15 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/splash', pageBuilder: (c, s) => _fade(s, const SplashScreen())),
       GoRoute(path: '/welcome', pageBuilder: (c, s) => _fade(s, const WelcomeScreen())),
-      GoRoute(path: '/phone', pageBuilder: (c, s) => _fade(s, const PhoneScreen())),
+      GoRoute(path: '/phone', pageBuilder: (c, s) => _fade(s, PhoneScreen(signIn: s.uri.queryParameters['signin'] == '1'))),
+      GoRoute(path: '/password', pageBuilder: (c, s) => _fade(s, PasswordScreen(phone: s.extra! as String))),
+      GoRoute(
+        path: '/signup/password',
+        pageBuilder: (c, s) => _fade(
+          s,
+          SetPasswordScreen(mode: s.uri.queryParameters['mode'] ?? 'new', then: s.uri.queryParameters['then'] ?? '/home'),
+        ),
+      ),
       GoRoute(
         path: '/otp',
         pageBuilder: (c, s) => _fade(s, OtpScreen(args: s.extra! as OtpArgs)),
@@ -79,28 +87,28 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/signup/unlock',
         pageBuilder: (c, s) => _fade(s, UnlockOfferScreen(next: s.uri.queryParameters['next'] ?? '/home')),
       ),
-      GoRoute(path: '/collect', pageBuilder: (c, s) => _fade(s, const CollectScreen())),
-      GoRoute(path: '/shop/:id', pageBuilder: (c, s) => _fade(s, ShopScreen(id: s.pathParameters['id']!))),
-      GoRoute(path: '/shop/:id/store', pageBuilder: (c, s) => _fade(s, StoreScreen(shopId: s.pathParameters['id']!))),
+      GoRoute(path: '/collect', builder: (c, s) => const CollectScreen()),
+      GoRoute(path: '/shop/:id', builder: (c, s) => ShopScreen(id: s.pathParameters['id']!)),
+      GoRoute(path: '/shop/:id/store', builder: (c, s) => StoreScreen(shopId: s.pathParameters['id']!)),
       GoRoute(
         path: '/shop/:id/product/:pid',
-        pageBuilder: (c, s) => _fade(s, ProductScreen(shopId: s.pathParameters['id']!, productId: s.pathParameters['pid']!)),
+        builder: (c, s) => ProductScreen(shopId: s.pathParameters['id']!, productId: s.pathParameters['pid']!),
       ),
-      GoRoute(path: '/cart', pageBuilder: (c, s) => _fade(s, const CartScreen())),
+      GoRoute(path: '/cart', builder: (c, s) => const CartScreen()),
       GoRoute(
         path: '/category/:key',
-        pageBuilder: (c, s) => _fade(s, ShopsScreen(category: s.pathParameters['key'], standalone: true)),
+        builder: (c, s) => ShopsScreen(category: s.pathParameters['key'], standalone: true),
       ),
-      GoRoute(path: '/points', pageBuilder: (c, s) => _fade(s, const PointsScreen())),
+      GoRoute(path: '/points', builder: (c, s) => const PointsScreen()),
       GoRoute(
         path: '/offers',
-        pageBuilder: (c, s) => _fade(s, OffersScreen(initialTab: s.uri.queryParameters['tab'] == 'rewards' ? 1 : 0)),
+        builder: (c, s) => OffersScreen(initialTab: s.uri.queryParameters['tab'] == 'rewards' ? 1 : 0),
       ),
-      GoRoute(path: '/bookings', pageBuilder: (c, s) => _fade(s, const BookingsScreen())),
-      GoRoute(path: '/tier', pageBuilder: (c, s) => _fade(s, const TierScreen())),
-      GoRoute(path: '/transfer', pageBuilder: (c, s) => _fade(s, const TransferScreen())),
-      GoRoute(path: '/mukafaah', pageBuilder: (c, s) => _fade(s, const MukafaahScreen())),
-      GoRoute(path: '/notifications', pageBuilder: (c, s) => _fade(s, const NotificationsScreen())),
+      GoRoute(path: '/bookings', builder: (c, s) => const BookingsScreen()),
+      GoRoute(path: '/tier', builder: (c, s) => const TierScreen()),
+      GoRoute(path: '/transfer', builder: (c, s) => const TransferScreen()),
+      GoRoute(path: '/mukafaah', builder: (c, s) => const MukafaahScreen()),
+      GoRoute(path: '/notifications', builder: (c, s) => const NotificationsScreen()),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => AppShell(shell: shell),
         branches: [

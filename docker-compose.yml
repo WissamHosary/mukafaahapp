@@ -31,6 +31,12 @@ services:
       KEYS_DIR: /app/keys
       OTP_DEV_ECHO: "true"
       OTP_ALLOWED_COUNTRIES: LB
+      # Sign-in codes on WhatsApp: set OTP_PROVIDER=whatsapp plus the WhatsApp
+      # Business Cloud API token, phone number ID and approved template name.
+      OTP_PROVIDER: ${OTP_PROVIDER:-console}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_OTP_TEMPLATE: ${WHATSAPP_OTP_TEMPLATE:-mukafaah_otp}
       DEFAULT_PHONE_REGION: LB
       # Browser test builds of the apps (tools\RUN-IN-BROWSER.bat).
       CORS_ORIGINS: http://localhost:8080,http://localhost:8081

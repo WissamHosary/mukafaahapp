@@ -1,3 +1,4 @@
+import { parsePhoneNumberFromString } from 'libphonenumber-js/max';
 import { randomInt } from 'node:crypto';
 import { pgCode, type Queryable } from '../platform/db.js';
 import { AppError } from '../platform/errors.js';
@@ -45,7 +46,7 @@ export const SHOP_CARD_SELECT = `
 export const SHOP_CARD_JOINS = `
   JOIN programs p ON p.id = b.earning_program_id AND p.status = 'ACTIVE'
   LEFT JOIN LATERAL (SELECT avg(stars)::float AS avg, count(*)::int AS cnt
-                       FROM business_ratings WHERE business_id = b.id) r ON true
+                       FROM business_ratings WHERE business_id = b.id AND NOT hidden) r ON true
   LEFT JOIN LATERAL (SELECT ab.balance FROM ledger_accounts a
                        JOIN account_balances ab ON ab.account_id = a.id
                       WHERE a.program_id = p.id AND a.owner_type = 'CUSTOMER' AND a.owner_id = $1::uuid) bal ON true
@@ -374,3 +375,8 @@ export async function notify(
 }
 
 export const fmtPts = (n: number) => Math.round(n).toLocaleString('en-US');
+
+/** "+96170111222" shown as "+961 70 111 222". */
+export function prettyPhone(e164: string): string {
+  return parsePhoneNumberFromString(e164)?.formatInternational() ?? e164;
+}

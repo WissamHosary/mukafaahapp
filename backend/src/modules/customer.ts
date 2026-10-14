@@ -44,7 +44,7 @@ export class CustomerController {
   private async profile(userId: string) {
     const u = await this.db.one(
       `SELECT id, name, locale, phone_last4, email, gender, birth_year, google_sub IS NOT NULL AS google,
-              profile_completed_at, created_at
+              password_hash IS NOT NULL AS has_password, profile_completed_at, created_at
          FROM users WHERE id = $1`,
       [userId],
     );
@@ -58,6 +58,7 @@ export class CustomerController {
       gender: u.gender ?? null,
       age: u.birth_year ? new Date().getFullYear() - u.birth_year : null,
       signInMethod: u.google ? 'GOOGLE' : 'PHONE',
+      hasPassword: !!u.has_password,
       needsProfile: !u.profile_completed_at,
       business: owns ?? null,
     };
