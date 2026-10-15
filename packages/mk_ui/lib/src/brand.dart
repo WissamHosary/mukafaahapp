@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
 
+import 'coin.dart';
 import 'tokens.dart';
 
 const _pkg = 'mk_ui';
@@ -35,28 +36,12 @@ class MkCoin extends StatelessWidget {
 
   final double size;
 
+  /// The Mukafaah "M" coin (see paintMukafaahCoin).
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: const RadialGradient(
-          center: Alignment(-0.35, -0.4),
-          radius: 0.95,
-          colors: [Color(0xFFFFEE7A), MkColors.yellow500, Color(0xFFD9A800)],
-          stops: [0, 0.55, 1],
-        ),
-        border: Border.all(color: const Color(0xFFC99700), width: size * 0.05),
-        boxShadow: size > 40 ? MkShadow.glow : null,
-      ),
-      padding: EdgeInsets.all(size * 0.2),
-      child: ColorFiltered(
-        colorFilter: const ColorFilter.mode(MkColors.purple900, BlendMode.srcIn),
-        child: Image.asset('assets/brand/logo_mark.png', package: _pkg, fit: BoxFit.contain),
-      ),
-    );
+    final coin = MkMCoin(size: size);
+    if (size <= 40) return coin;
+    return DecoratedBox(decoration: const BoxDecoration(shape: BoxShape.circle, boxShadow: MkShadow.glow), child: coin);
   }
 }
 

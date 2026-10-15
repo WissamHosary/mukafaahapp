@@ -349,6 +349,20 @@ class BusinessApi {
   String? url(String? path) => client.resolve(path);
 
   Future<Json> profile() => client.get<Json>('/v1/business/manage/profile');
+
+  /// The Shared / Network group this shop earns in (type IN_STORE when none).
+  Future<Json> pointsGroup() async {
+    try {
+      return await client.get<Json>('/v1/business/manage/points-group');
+    } on ApiException catch (e) {
+      if (e.status == 404) return {'type': 'IN_STORE'};
+      rethrow;
+    }
+  }
+
+  /// Network shops: how much of a customer's points they take per visit.
+  Future<void> setGroupLimits({required int maxPercent, int? maxPoints}) =>
+      client.put<Json>('/v1/business/manage/points-group/limits', data: {'maxPercent': maxPercent, 'maxPoints': maxPoints});
   Future<Json> updateProfile(Json patch) => client.patch<Json>('/v1/business/manage/profile', data: patch);
 
   /// Uploads an image (base64). Purpose 'logo' or 'cover' applies it to the shop right away.

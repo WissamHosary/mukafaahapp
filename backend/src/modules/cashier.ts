@@ -3,6 +3,7 @@ import { verify as verifyPin } from '@node-rs/argon2';
 import { z } from 'zod';
 import { audit } from '../platform/audit.js';
 import { Auth, ClientIp, IdemKey, OptionalIdemKey, RequireStaff, type StaffAuth } from '../platform/auth.js';
+import { capFor } from './programs.js';
 import { CryptoService } from '../platform/crypto.js';
 import { Db, type Queryable, type Tx } from '../platform/db.js';
 import { AppError, Errors } from '../platform/errors.js';
@@ -204,7 +205,7 @@ export class CashierController {
     const ownerType = t.kind === 'user' ? 'CUSTOMER' : 'PENDING';
     const ownerId = t.kind === 'user' ? t.userId : t.holderId;
     const r = await this.db.query(
-      `SELECT p.id, p.type, p.name, p.redeem_points_per_unit, pm.can_redeem,
+      `SELECT p.id, p.type, p.name, p.redeem_points_per_unit, pm.can_redeem, pm.redeem_max_percent, pm.redeem_max_points,
               COALESCE((SELECT ab.balance FROM ledger_accounts a JOIN account_balances ab ON ab.account_id = a.id
                          WHERE a.program_id = p.id AND a.owner_type = $2 AND a.owner_id = $3::uuid), 0) AS balance
          FROM program_members pm JOIN programs p ON p.id = pm.program_id
@@ -227,6 +228,11 @@ export class CashierController {
       balance: Number(x.balance),
       canRedeemHere: x.can_redeem,
       pointsPerUnitDiscount: x.redeem_points_per_unit,
+      // Network shops may take only part of the balance per visit.
+      maxRedeemHere:
+        x.type === 'NETWORK' || x.type === 'SHARED'
+          ? capFor(Number(x.balance), Number(x.redeem_max_percent), x.redeem_max_points == null ? null : Number(x.redeem_max_points))
+          : Number(x.balance),
     }));
     let bookings: ReturnType<typeof bookingJson>[] = [];
     let walkInOffers: Record<string, unknown>[] = [];

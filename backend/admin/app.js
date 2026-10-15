@@ -406,7 +406,7 @@
       ['Customer app', [['home', 'phone', 'Home screen'], ['banners', 'image', 'Banners'], ['categories', 'grid', 'Categories'], ['offers', 'tag', 'Offers']]],
     ];
     if (isFull()) {
-      g.push(['Loyalty', [['tiers', 'crown', 'Tiers'], ['mukafaah', 'coins', 'Mukafaah Points']]]);
+      g.push(['Loyalty', [['tiers', 'crown', 'Tiers'], ['groups', 'link', 'Shared & Network'], ['mukafaah', 'coins', 'Mukafaah Points']]]);
       g.push(['Admin', [['accounts', 'shield', 'Accounts'], ['settings', 'settings', 'Settings']]]);
     }
     return g;
@@ -2154,6 +2154,83 @@
   }
 
   // =====================================================================
+  // Shared and Network points groups
+  // =====================================================================
+  const GROUP_KIND = {
+    SHARED: ['Shared', 'One set of points for every shop in the group. Earn at one shop, spend all of it at any other.'],
+    NETWORK: ['Network', 'One set of points across the group, but each shop sets how much it takes per visit (a % of the balance and/or a points limit).'],
+  };
+  async function pageGroups() {
+    crumbs([['Loyalty'], ['Shared & Network']]);
+    loading('Shared & Network');
+    const d = await api('GET', '/v1/admin/programs');
+    const v = mount(ph('Shared & Network', 'Groups of shops that share points. A shop earns in one group at a time; points it gave before stay usable at that shop.', `<button class="btn" id="newG">${ic('plus', 'sm')} New group</button>`) + `
+      <div class="gkinds">${Object.entries(GROUP_KIND).map(([k, [t, d2]]) => `<div class="card gk ${k.toLowerCase()}"><span class="pill ${k === 'SHARED' ? 'pur' : 'y'}">${t}</span><p>${esc(d2)}</p></div>`).join('')}<div class="card gk instore"><span class="pill">In-Store</span><p>Every other shop: its points work only there.</p></div></div>
+      <div id="gl"></div>`);
+    const shopsIn = new Set(d.programs.flatMap((p) => p.members.map((m) => m.shopId)));
+    $('#gl', v).innerHTML = d.programs.length ? d.programs.map((p) => `
+      <div class="card flush mt16 grp" data-id="${esc(p.id)}">
+        <div class="card-h"><span class="pill ${p.type === 'SHARED' ? 'pur' : 'y'}">${esc(GROUP_KIND[p.type][0])}</span><h3>${esc(p.name)}</h3>${p.active ? '' : '<span class="pill">Paused</span>'}<span class="sp"></span>
+          <span class="muted">${num(p.members.length)} shop${p.members.length === 1 ? '' : 's'} · ${num(p.outstandingPoints)} pts with customers</span>
+          <button class="btn sec sm" data-edit>${ic('edit', 'sm')} Edit</button></div>
+        <div class="grp-earn">Customers get <b>${esc(p.earnPercent)}%</b> of every bill back as points at every shop in this group. 100 points = $1.</div>
+        <div class="tw nomax"><table class="tbl"><thead><tr><th>Shop</th>${p.type === 'NETWORK' ? '<th>Takes per visit</th><th>Max points per visit</th>' : '<th>Spending</th>'}<th></th></tr></thead><tbody>
+          ${p.members.map((m) => `<tr data-shop="${esc(m.shopId)}"><td><div class="who"><span class="avatar lt">${m.logoUrl ? `<img src="${esc(m.logoUrl)}" alt="">` : esc(initials(m.name))}</span><div class="t"><b>${esc(m.name)}</b><small>${esc(catName(m.category))}${m.city ? ' · ' + esc(m.city) : ''}</small></div></div></td>
+            ${p.type === 'NETWORK' ? `<td><div class="inwrap" style="width:120px"><input class="in sm hasuf" data-f="pct" type="number" min="1" max="100" value="${esc(m.maxPercent)}" aria-label="Percent of balance"><span class="suf">%</span></div><small class="muted">of the customer's points</small></td>
+              <td><div class="inwrap" style="width:140px"><input class="in sm hasuf" data-f="max" type="number" min="1" placeholder="No limit" value="${m.maxPoints ?? ''}" aria-label="Max points per visit"><span class="suf">pts</span></div></td>` : '<td class="muted">All of the customer’s points</td>'}
+            <td class="r"><button class="btn ghost sm" data-out>Remove</button></td></tr>`).join('') || `<tr><td colspan="4">${empty('store', 'No shops yet', 'Add shops below.')}</td></tr>`}
+        </tbody></table></div>
+        <div class="grp-add"><select class="in sm" data-add aria-label="Add a shop">${opt('', 'Add a shop to this group…', '')}${d.shops.filter((x) => !p.members.some((m) => m.shopId === x.id)).map((x) => opt(x.id, `${x.name}${x.programType !== 'IN_STORE' ? ` (now in ${x.programName})` : ''}`, '')).join('')}</select></div>
+      </div>`).join('') : `<div class="card mt16">${empty('link', 'No groups yet', 'Make a Shared or Network group, then add shops to it.')}</div>`;
+    const edit = (p) => {
+      modal(p ? `Edit ${p.name}` : 'New group', `
+        ${p ? '' : `<div class="f"><span>Type</span><div class="seg2">${Object.entries(GROUP_KIND).map(([k, [t]], i) => `<label><input type="radio" name="type" value="${k}" ${i === 0 ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div><em>Shared: spend everything anywhere. Network: each shop can limit how much it takes.</em></div>`}
+        <label class="f"><span>Name</span><input class="in" name="name" maxlength="60" value="${esc(p?.name || '')}" placeholder="Hamra Food Circle"></label>
+        <label class="f"><span>Points back for customers</span><span class="pct" style="width:100%"><input class="in" type="number" name="earnPercent" min="0" max="100" value="${esc(p?.earnPercent ?? 10)}" style="width:100%"></span><em>The same at every shop in the group.</em></label>
+        <label class="f"><span>About (optional)</span><input class="in" name="description" maxlength="300" value="${esc(p?.description || '')}"></label>
+        ${p ? `<div class="optcard"><div class="swrow">${toggle('active', p.active)}<div class="t"><b>Group is on</b><small>Off: shops in it can't give or take these points.</small></div></div></div>` : ''}`,
+        async (f) => {
+          const body = { name: val(f, 'name'), earnPercent: Math.round(Number(val(f, 'earnPercent')) || 0), description: orNull(val(f, 'description')) };
+          if (body.name.length < 2) { toast('Give the group a name.', true); return false; }
+          if (p) await api('PATCH', `/v1/admin/programs/${p.id}`, { ...body, active: f.elements.active.checked });
+          else await api('POST', '/v1/admin/programs', { ...body, type: f.querySelector('input[name=type]:checked').value });
+          toast('Saved'); pageGroups();
+        }, { size: 'sm' });
+    };
+    $('#newG', v).onclick = () => edit(null);
+    const member = async (gid, shopId, body, msg) => {
+      try { await api('PUT', `/v1/admin/programs/${gid}/members/${shopId}`, body); toast(msg); return true; } catch (e) { fail(e); return false; }
+    };
+    v.addEventListener('click', async (e) => {
+      const g = e.target.closest('.grp'); if (!g) return; const p = d.programs.find((x) => x.id === g.dataset.id);
+      if (e.target.closest('[data-edit]')) edit(p);
+      const out = e.target.closest('[data-out]');
+      if (out) {
+        const tr = out.closest('tr'); const m = p.members.find((x) => x.shopId === tr.dataset.shop);
+        if (await confirmBox(`Remove ${m.name}?`, 'It goes back to its own In-Store points. Customers keep the group points they have and can spend them at the other shops.', 'Remove'))
+          if (await member(p.id, m.shopId, { active: false }, `${m.name} left ${p.name}`)) pageGroups();
+      }
+    });
+    v.addEventListener('change', async (e) => {
+      const g = e.target.closest('.grp'); if (!g) return; const p = d.programs.find((x) => x.id === g.dataset.id);
+      if (e.target.matches('[data-add]') && e.target.value) {
+        const shop = d.shops.find((x) => x.id === e.target.value);
+        const note = shop.programType !== 'IN_STORE' ? ` It leaves ${shop.programName}.` : '';
+        if (await confirmBox(`Add ${shop.name} to ${p.name}?`, `From now on its customers earn ${p.name} points there.${note}`, 'Add')) {
+          if (await member(p.id, shop.id, { active: true }, `${shop.name} joined ${p.name}`)) pageGroups();
+        } else e.target.value = '';
+        return;
+      }
+      const tr = e.target.closest('tr[data-shop]'); if (!tr) return;
+      const pct = Math.max(1, Math.min(100, Math.round(Number($('[data-f=pct]', tr)?.value) || 100)));
+      const maxRaw = $('[data-f=max]', tr)?.value; const max = maxRaw ? Math.max(1, Math.round(Number(maxRaw))) : null;
+      if ($('[data-f=pct]', tr)) $('[data-f=pct]', tr).value = pct;
+      const name = $('b', tr).textContent;
+      await member(p.id, tr.dataset.shop, { maxPercent: pct, maxPoints: max }, `${name}: takes up to ${pct}% of the points${max ? `, at most ${num(max)} per visit` : ''}`);
+    });
+  }
+
+  // =====================================================================
   // Accounts and settings
   // =====================================================================
   const ROLE_DESC = {
@@ -2260,7 +2337,7 @@
   const ROUTES = {
     overview: [pageOverview, isContent], shops: [pageShops, isContent], reports: [pageReports, () => true], customers: [pageCustomers, isContent],
     home: [pageHome, isContent], banners: [pageBanners, isContent], categories: [pageCategories, isContent], offers: [pageOffers, isContent],
-    tiers: [pageTiers, isFull], mukafaah: [pageMukafaah, isFull], accounts: [pageAccounts, isFull], settings: [pageSettings, isFull], myshops: [pageMyShops, isShop], newshop: [pageNewShop, isFull],
+    tiers: [pageTiers, isFull], groups: [pageGroups, isFull], mukafaah: [pageMukafaah, isFull], accounts: [pageAccounts, isFull], settings: [pageSettings, isFull], myshops: [pageMyShops, isShop], newshop: [pageNewShop, isFull],
   };
   function homeHash() {
     if (!isShop()) return 'overview';

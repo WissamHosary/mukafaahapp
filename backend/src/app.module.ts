@@ -16,6 +16,7 @@ import { MerchantModule } from './modules/merchant.js';
 import { StoreModule } from './modules/store.js';
 import { RedeemModule } from './modules/redeem.js';
 import { MukafaahModule } from './modules/mukafaah.js';
+import { ProgramsModule } from './modules/programs.js';
 import { LoginsModule } from './modules/logins.js';
 
 @Controller('health')
@@ -35,7 +36,7 @@ class HealthController {
     CryptoModule,
     LedgerModule,
     AuthModule,
-    LoginsModule,
+    LoginsModule, ProgramsModule,
     CustomerModule,
     CatalogModule,
     EngageModule,

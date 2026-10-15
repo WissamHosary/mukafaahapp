@@ -325,66 +325,12 @@ class _CoinHeader extends ConsumerWidget {
   }
 }
 
-class _CoinRain extends StatefulWidget {
+/// Mukafaah "M" coins falling behind the header (see MkCoinRain: drawn once, then only moved).
+class _CoinRain extends StatelessWidget {
   const _CoinRain();
 
   @override
-  State<_CoinRain> createState() => _CoinRainState();
-}
-
-class _CoinRainState extends State<_CoinRain> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(seconds: 30))..repeat();
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (MediaQuery.disableAnimationsOf(context)) return const SizedBox.shrink();
-    return IgnorePointer(child: RepaintBoundary(child: CustomPaint(painter: _CoinPainter(_c))));
-  }
-}
-
-class _CoinPainter extends CustomPainter {
-  _CoinPainter(this.anim) : super(repaint: anim);
-  final Animation<double> anim;
-
-  static final _coins = List.generate(16, (i) {
-    final r = math.Random(i * 7919 + 13);
-    return (x: r.nextDouble(), off: r.nextDouble(), speed: 0.5 + r.nextDouble() * 0.9, size: 6 + r.nextDouble() * 9, spin: r.nextDouble() * 6, w: 2 + r.nextDouble() * 4);
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final secs = anim.value * 30;
-    for (final c in _coins) {
-      final travel = size.height + 40;
-      final y = (c.off * travel + secs * 60 * c.speed) % travel - 20;
-      final x = c.x * size.width;
-      final squeeze = math.max(0.15, math.cos(c.spin + secs * c.w).abs());
-      canvas
-        ..save()
-        ..translate(x, y)
-        ..scale(squeeze, 1)
-        ..drawCircle(
-          Offset.zero,
-          c.size,
-          Paint()
-            ..shader = RadialGradient(
-              center: const Alignment(-0.3, -0.3),
-              colors: [const Color(0x8CFFF3B0), const Color(0x8CFBD404), const Color(0x8CC99A00)],
-              stops: const [0, 0.5, 1],
-            ).createShader(Rect.fromCircle(center: Offset.zero, radius: c.size)),
-        )
-        ..restore();
-    }
-  }
-
-  @override
-  bool shouldRepaint(_CoinPainter old) => false;
+  Widget build(BuildContext context) => const MkCoinRain(count: 12, opacity: 0.85);
 }
 
 // ---------------------------------------------------------------- Big buttons

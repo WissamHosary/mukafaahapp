@@ -5,6 +5,7 @@ import { Auth, RequireUser, type UserAuth } from '../platform/auth.js';
 import { Db, type Queryable, type Tx } from '../platform/db.js';
 import { AppError, Errors } from '../platform/errors.js';
 import { parse, zUuid } from '../platform/validation.js';
+import { capFor } from './programs.js';
 import { LedgerService } from './ledger.js';
 import { mukafaahProgramId } from './mukafaah.js';
 import { alertBusiness, bookingCode, bookingJson, fmtPts, mediaUrl, notify, pointsValueMinor } from './shared.js';
@@ -103,6 +104,24 @@ export class RedeemService {
 
   /** Posts the REDEEM (customer -> shop's redeemed account) and records the visit. */
   private async post(c: Tx, ctx: SpendCtx, prog: any, points: number, ref: { type: RefType; id: string | null } | null) {
+    // Network shops may take only part of the customer's points per visit.
+    if (prog.type === 'NETWORK' || prog.type === 'SHARED') {
+      const m = (
+        await c.query(`SELECT redeem_max_percent, redeem_max_points FROM program_members WHERE program_id = $1 AND business_id = $2`, [
+          prog.id,
+          ctx.businessId,
+        ])
+      ).rows[0];
+      if (m) {
+        const allowed = capFor(await this.balance(c, prog.id, ctx.userId), Number(m.redeem_max_percent), m.redeem_max_points == null ? null : Number(m.redeem_max_points));
+        if (points > allowed) {
+          throw new AppError(400, 'OVER_SHOP_CAP', `This shop takes at most ${fmtPts(allowed)} of these points on this visit`, {
+            maxPoints: allowed,
+            maxPercent: Number(m.redeem_max_percent),
+          });
+        }
+      }
+    }
     const wallet = await this.ledger.account(c, prog.id, 'CUSTOMER', ctx.userId);
     const redeemed = await this.ledger.account(c, prog.id, 'BUSINESS_REDEEMED', ctx.businessId);
     const txId = await this.ledger.post(c, {

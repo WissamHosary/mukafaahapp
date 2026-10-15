@@ -152,6 +152,9 @@ export class OwnerController {
     const earn = b.earnPercent ?? b.earnPointsPerUnit;
     const redeem = b.earnPercent !== undefined ? 100 : b.redeemPointsPerUnit;
     await this.db.tx(async (c) => {
+      // In a Shared or Network group the % is the group's, set by Mukafaah.
+      const g = (await c.query(`SELECT p.type, p.name FROM businesses x JOIN programs p ON p.id = x.earning_program_id WHERE x.id = $1`, [a.businessId])).rows[0];
+      if (g && g.type !== 'IN_STORE') throw new AppError(409, 'IN_GROUP', `Your shop earns with the ${g.name} group. Mukafaah sets its %.`);
       await c.query(
         `UPDATE programs SET earn_points_per_unit = COALESCE($2, earn_points_per_unit),
                              redeem_points_per_unit = COALESCE($3, redeem_points_per_unit),

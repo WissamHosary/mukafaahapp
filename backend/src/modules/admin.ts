@@ -351,6 +351,10 @@ export class AdminController {
         if (!r.rowCount) throw Errors.notFound('Shop');
       }
       if (b.earnPercent !== undefined) {
+        const g = (await c.query(`SELECT p.type, p.name FROM businesses x JOIN programs p ON p.id = x.earning_program_id WHERE x.id = $1`, [bid])).rows[0];
+        if (g && g.type !== 'IN_STORE') {
+          throw new AppError(409, 'IN_GROUP', `This shop earns with the ${g.name} group. Change the % on the group in Shared & Network.`);
+        }
         // 100 points = $1 off, so earning N points per $1 gives back exactly N% of the bill.
         const earn = b.earnPercent;
         await c.query(

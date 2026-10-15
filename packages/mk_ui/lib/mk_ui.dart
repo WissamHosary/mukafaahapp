@@ -2,6 +2,7 @@
 library;
 
 export 'src/brand.dart';
+export 'src/coin.dart';
 export 'src/catalog_widgets.dart';
 export 'src/components.dart';
 export 'src/dev_server.dart';

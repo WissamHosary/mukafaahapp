@@ -374,6 +374,17 @@ export class CatalogController {
       ),
     ]);
     // One review per member, after a real visit or a completed order (no fake reviews).
+    // Shared / Network: which group, how many shops, and this shop's limit.
+    const group =
+      card.programType === 'SHARED' || card.programType === 'NETWORK'
+        ? await this.db.one(
+            `SELECT p.name, p.type, pm.redeem_max_percent, pm.redeem_max_points,
+                    (SELECT count(*)::int FROM program_members x JOIN businesses xb ON xb.id = x.business_id
+                      WHERE x.program_id = p.id AND x.active AND xb.status = 'ACTIVE') AS shops
+               FROM programs p JOIN program_members pm ON pm.program_id = p.id AND pm.business_id = $2 WHERE p.id = $1`,
+            [card.programId, bid],
+          )
+        : null;
     const visited = await this.db.one(
       `SELECT 1 WHERE EXISTS (SELECT 1 FROM visits WHERE business_id = $1 AND user_id = $2)
           OR EXISTS (SELECT 1 FROM whatsapp_orders WHERE business_id = $1 AND user_id = $2 AND status = 'COMPLETED')`,
@@ -402,6 +413,15 @@ export class CatalogController {
       })),
       // How many reviews gave 1 to 5 stars.
       starCounts: [1, 2, 3, 4, 5].map((n) => Number(stars.rows.find((x) => Number(x.stars) === n)?.n ?? 0)),
+      group: group
+        ? {
+            name: group.name,
+            type: group.type,
+            shops: group.shops,
+            maxPercent: Number(group.redeem_max_percent),
+            maxPoints: group.redeem_max_points == null ? null : Number(group.redeem_max_points),
+          }
+        : null,
       storeEnabled: !!r.store_enabled,
       branches: branches.rows.map((x) => x.name),
       offers: offers.rows.map((o) => ({ ...offerJson(o), myOpenBooking: openBooking.get(o.id) ?? null })),

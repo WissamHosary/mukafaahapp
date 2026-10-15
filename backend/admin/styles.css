@@ -889,3 +889,16 @@ svg.chart .area { animation: fade .6s .25s both; }
 .rv-bar i b { display: block; height: 100%; background: #F5B400; border-radius: 4px; }
 .tbl td.wrap { white-space: normal; max-width: 460px; }
 .tbl tr.dim td { opacity: .5; }
+
+/* ---------- Shared & Network groups ---------- */
+.gkinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .gkinds { grid-template-columns: minmax(0, 1fr); } }
+.gk p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.grp-earn { padding: 0 20px 12px; color: var(--ink-2); font-size: 13.5px; }
+.grp-add { padding: 12px 20px 16px; border-top: 1px solid var(--line-2); } .grp-add select { max-width: 360px; }
+.seg2 { display: flex; gap: 8px; } .seg2 label { flex: 1; } .seg2 input { position: absolute; opacity: 0; }
+.seg2 span { display: block; text-align: center; padding: 10px; border-radius: var(--r); border: 1px solid var(--line); cursor: pointer; font-weight: 600; }
+.seg2 input:checked + span { border-color: var(--violet); background: var(--violet-bg); color: var(--violet); }
+.seg2 input:focus-visible + span { outline: 2px solid var(--violet); outline-offset: 2px; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.gkinds .card { margin: 0; }
