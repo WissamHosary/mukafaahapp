@@ -40,7 +40,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     ..listen(authProvider, (_, next) => status.value = next.status)
     ..onDispose(status.dispose);
 
-  const publicPaths = {'/welcome', '/phone', '/otp', '/password'};
+  const publicPaths = {'/welcome', '/signin', '/phone', '/otp', '/password'};
 
   return GoRouter(
     initialLocation: '/splash',
@@ -62,6 +62,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/splash', pageBuilder: (c, s) => _fade(s, const SplashScreen())),
       GoRoute(path: '/welcome', pageBuilder: (c, s) => _fade(s, const WelcomeScreen())),
       GoRoute(path: '/phone', pageBuilder: (c, s) => _fade(s, PhoneScreen(signIn: s.uri.queryParameters['signin'] == '1'))),
+      GoRoute(path: '/signin', pageBuilder: (c, s) => _fade(s, const SignInScreen())),
       GoRoute(path: '/password', pageBuilder: (c, s) => _fade(s, PasswordScreen(phone: s.extra! as String))),
       GoRoute(
         path: '/signup/password',

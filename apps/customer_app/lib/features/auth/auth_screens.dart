@@ -62,29 +62,39 @@ class WelcomeScreen extends ConsumerStatefulWidget {
   ConsumerState<WelcomeScreen> createState() => _WelcomeScreenState();
 }
 
+/// Google sign-in, used on the welcome and sign-in screens. Members who
+/// already finished their profile go straight in.
+Future<void> continueWithGoogle(BuildContext context, WidgetRef ref) async {
+  final s = ref.read(stringsProvider);
+  if (!GoogleAuth.configured) {
+    MkToast.show(context, s.tr('التسجيل بحساب Google مش جاهز بعد. استعمل رقم تلفونك.', 'Google sign-in is not set up yet. Use your phone number.'));
+    return;
+  }
+  try {
+    final token = await GoogleAuth.idToken();
+    if (token == null || !context.mounted) return;
+    final r = await ref.read(apiProvider).signInWithGoogle(token, ref.read(localeProvider));
+    if (r.user.needsProfile) {
+      ref.read(authProvider.notifier).signedIn(r.user, next: '/signup/name?suggest=${Uri.encodeComponent(r.suggestedName ?? '')}');
+    } else {
+      ref.read(authProvider.notifier).signedIn(r.user, next: await landingAfterSignIn(ref));
+    }
+  } on ApiException catch (e) {
+    if (context.mounted) MkToast.show(context, s.error(e.code), kind: MkToastKind.error);
+  } on Object {
+    if (context.mounted) {
+      MkToast.show(context, s.tr('ما زبط التسجيل بـ Google. جرّب مرة تانية.', 'Google sign-in did not work. Try again.'), kind: MkToastKind.error);
+    }
+  }
+}
+
 class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
   bool _google = false;
 
   Future<void> _withGoogle() async {
-    final s = ref.read(stringsProvider);
-    if (!GoogleAuth.configured) {
-      MkToast.show(context, s.tr('التسجيل بحساب Google مش جاهز بعد. استعمل رقم تلفونك.', 'Google sign-in is not set up yet. Use your phone number.'));
-      return;
-    }
     setState(() => _google = true);
     try {
-      final token = await GoogleAuth.idToken();
-      if (token == null || !mounted) return;
-      final r = await ref.read(apiProvider).signInWithGoogle(token, ref.read(localeProvider));
-      if (r.user.needsProfile) {
-        ref.read(authProvider.notifier).signedIn(r.user, next: '/signup/name?suggest=${Uri.encodeComponent(r.suggestedName ?? '')}');
-      } else {
-        ref.read(authProvider.notifier).signedIn(r.user, next: await landingAfterSignIn(ref));
-      }
-    } on ApiException catch (e) {
-      if (mounted) MkToast.show(context, s.error(e.code), kind: MkToastKind.error);
-    } on Object {
-      if (mounted) MkToast.show(context, s.tr('ما زبط التسجيل بـ Google. جرّب مرة تانية.', 'Google sign-in did not work. Try again.'), kind: MkToastKind.error);
+      await continueWithGoogle(context, ref);
     } finally {
       if (mounted) setState(() => _google = false);
     }
@@ -155,7 +165,7 @@ class _WelcomeScreenState extends ConsumerState<WelcomeScreen> {
                 children: [
                   Text(s.tr('عندك حساب؟', 'Already have an account?'), style: t.bodyMedium?.copyWith(color: MkColors.ink2)),
                   TextButton(
-                    onPressed: () => context.push('/phone?signin=1'),
+                    onPressed: () => context.push('/signin'),
                     style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                     child: Text(s.tr('فوت', 'Sign in'), style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w800, color: MkColors.purple700)),
                   ),
@@ -646,6 +656,205 @@ class _WhatsAppNote extends ConsumerWidget {
   }
 }
 
+/// "Already have an account?": phone number and password on one screen,
+/// "Forgot password?" and Google underneath. No WhatsApp code is needed
+/// unless the number has no password yet or the password is forgotten.
+class SignInScreen extends ConsumerStatefulWidget {
+  const SignInScreen({super.key});
+
+  @override
+  ConsumerState<SignInScreen> createState() => _SignInScreenState();
+}
+
+class _SignInScreenState extends ConsumerState<SignInScreen> {
+  final _phone = TextEditingController();
+  final _pw = TextEditingController();
+  bool _show = false;
+  bool _busy = false;
+  bool _sending = false;
+  bool _google = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    for (final c in [_phone, _pw]) {
+      c.addListener(() => setState(() => _error = null));
+    }
+  }
+
+  @override
+  void dispose() {
+    _phone.dispose();
+    _pw.dispose();
+    super.dispose();
+  }
+
+  String get _digits => _phone.text.trim();
+  bool get _ready => _digits.length >= 7 && _pw.text.isNotEmpty;
+
+  Future<void> _signIn() async {
+    if (!_ready || _busy) return;
+    final s = ref.read(stringsProvider);
+    setState(() => _busy = true);
+    try {
+      final u = await ref.read(apiProvider).signInWithPassword(_digits, _pw.text);
+      final next = u.needsProfile ? _profileRoute(u) : await landingAfterSignIn(ref);
+      ref.read(authProvider.notifier).signedIn(u, next: next);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      unawaited(HapticFeedback.heavyImpact());
+      if (e.code == 'LOGIN_INVALID') {
+        // A member from before passwords existed: one WhatsApp code, then they choose one.
+        final st = await ref.read(apiProvider).checkPhone(_digits).catchError((_) => const PhoneStatus(exists: true, hasPassword: true));
+        if (!mounted) return;
+        if (!st.exists) {
+          setState(() => _error = s.tr('ما في حساب على هالرقم. اعمل حساب جديد.', 'No account on this number. Create a new one.'));
+          return;
+        }
+        if (!st.hasPassword) {
+          setState(() => _error = s.tr('هالحساب ما إلو كلمة سر بعد. اضغط "نسيت كلمة السر" لتختار وحدة برمز واتساب.',
+              'This account has no password yet. Tap "Forgot password?" to choose one with a WhatsApp code.'));
+          return;
+        }
+      }
+      setState(() => _error = s.error(e.code));
+    } on Object {
+      if (mounted) setState(() => _error = s.somethingWrong);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _forgot() async {
+    final s = ref.read(stringsProvider);
+    if (_digits.length < 7) {
+      setState(() => _error = s.tr('اكتب رقمك أول.', 'Type your phone number first.'));
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      final st = await ref.read(apiProvider).checkPhone(_digits);
+      if (!mounted) return;
+      if (!st.exists) {
+        setState(() => _error = s.tr('ما في حساب على هالرقم. اعمل حساب جديد.', 'No account on this number. Create a new one.'));
+        return;
+      }
+      await _sendCode(context, ref, _digits, st.hasPassword ? OtpPurpose.reset : OtpPurpose.firstPassword);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = s.error(e.code));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _withGoogle() async {
+    setState(() => _google = true);
+    try {
+      await continueWithGoogle(context, ref);
+    } finally {
+      if (mounted) setState(() => _google = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    return _StepScaffold(
+      title: s.tr('أهلا فيك من جديد', 'Welcome back'),
+      body: s.tr('فوت برقمك وكلمة السر.', 'Sign in with your phone number and password.'),
+      onBack: () => context.canPop() ? context.pop() : context.go('/welcome'),
+      bottom: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MkButton(label: s.tr('فوت', 'Sign in'), icon: Icons.login_rounded, loading: _busy, onPressed: _ready ? _signIn : null),
+          const SizedBox(height: MkSpace.sm),
+          Row(
+            children: [
+              const Expanded(child: Divider()),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: MkSpace.sm),
+                child: Text(s.tr('أو', 'or'), style: t.labelMedium?.copyWith(color: MkColors.ink3)),
+              ),
+              const Expanded(child: Divider()),
+            ],
+          ),
+          const SizedBox(height: MkSpace.sm),
+          MkButton(
+            label: s.tr('فوت بحساب Google', 'Sign in with Google'),
+            icon: Icons.mail_outline_rounded,
+            kind: MkButtonKind.secondary,
+            loading: _google,
+            onPressed: _withGoogle,
+          ),
+          TextButton(
+            onPressed: () => context.pushReplacement('/phone'),
+            child: Text.rich(
+              TextSpan(
+                text: s.tr('جديد بمكافأة؟ ', 'New to Mukafaah? '),
+                style: t.bodyMedium?.copyWith(color: MkColors.ink2),
+                children: [TextSpan(text: s.tr('اعمل حساب', 'Create an account'), style: const TextStyle(fontWeight: FontWeight.w800, color: MkColors.purple700))],
+              ),
+            ),
+          ),
+        ],
+      ),
+      child: AutofillGroup(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            MkPhoneField(controller: _phone),
+            const SizedBox(height: MkSpace.sm),
+            TextField(
+              controller: _pw,
+              obscureText: !_show,
+              autofillHints: const [AutofillHints.password],
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _signIn(),
+              decoration: InputDecoration(
+                hintText: s.tr('كلمة السر', 'Password'),
+                prefixIcon: const Icon(Icons.lock_outline_rounded),
+                suffixIcon: IconButton(
+                  tooltip: _show ? s.tr('خبّي', 'Hide') : s.tr('بيّن', 'Show'),
+                  onPressed: () => setState(() => _show = !_show),
+                  icon: Icon(_show ? Icons.visibility_off_rounded : Icons.visibility_rounded),
+                ),
+              ),
+            ),
+            AnimatedSize(
+              duration: MkMotion.base,
+              child: _error == null
+                  ? const SizedBox(width: double.infinity)
+                  : Padding(
+                      padding: const EdgeInsets.only(top: MkSpace.xs),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.error_outline_rounded, size: 18, color: MkColors.danger),
+                          const SizedBox(width: 6),
+                          Expanded(child: Text(_error!, style: t.bodySmall?.copyWith(color: MkColors.danger, fontWeight: FontWeight.w600))),
+                        ],
+                      ),
+                    ),
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton.icon(
+                onPressed: _sending ? null : _forgot,
+                icon: _sending
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.help_outline_rounded, size: 18),
+                label: Text(s.tr('نسيت كلمة السر؟', 'Forgot password?'), style: t.labelLarge?.copyWith(fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Members with a password: phone was typed on the previous screen.
 class PasswordScreen extends ConsumerStatefulWidget {
   const PasswordScreen({required this.phone, super.key});
@@ -953,6 +1162,8 @@ class _SetPasswordScreenState extends ConsumerState<SetPasswordScreen> {
       context.go(widget.then);
     } on ApiException catch (e) {
       if (mounted) MkToast.show(context, s.error(e.code), kind: MkToastKind.error);
+    } on Object {
+      if (mounted) MkToast.show(context, s.somethingWrong, kind: MkToastKind.error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1181,6 +1392,9 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       if (mounted) context.go('/signup/done${_inviteCheck?.valid == true ? '?invitedBy=${Uri.encodeComponent(_inviteCheck!.referrer ?? '')}' : ''}');
     } on ApiException catch (e) {
       if (mounted) MkToast.show(context, s.error(e.code), kind: MkToastKind.error);
+    } on Object {
+      // Never fail silently: say so, so the member can try again.
+      if (mounted) MkToast.show(context, s.somethingWrong, kind: MkToastKind.error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

@@ -75,19 +75,22 @@ export class CustomerController {
     const b = parse(zComplete, body);
     await this.db.tx(async (c) => {
       const u = (await c.query(`SELECT * FROM users WHERE id = $1 FOR UPDATE`, [auth.userId])).rows[0];
-      if (u.profile_completed_at) throw new AppError(409, 'PROFILE_DONE', 'Your profile is already set up');
+      // Already set up (for example the app asked again after signing back in):
+      // just save the new details instead of refusing, so the member is never stuck.
+      const again = !!u.profile_completed_at;
       const byPhone = !u.google_sub;
-      if (byPhone && (b.age == null || !b.gender)) {
+      if (byPhone && !again && (b.age == null || !b.gender)) {
         throw new AppError(400, 'PROFILE_INCOMPLETE', 'Age and gender are needed');
       }
       await c.query(
         `UPDATE users SET name = $2, birth_year = COALESCE($3, birth_year), gender = COALESCE($4, gender),
-                locale = COALESCE($5, locale), profile_completed_at = now(), updated_at = now()
+                locale = COALESCE($5, locale), profile_completed_at = COALESCE(profile_completed_at, now()), updated_at = now()
           WHERE id = $1`,
         [auth.userId, b.name, b.age == null ? null : new Date().getFullYear() - b.age, b.gender ?? null, b.locale ?? null],
       );
-      if (b.referralCode) await applyReferral(c, this.ledger, auth.userId, b.referralCode);
-      await audit(c, { actorType: 'USER', actorId: auth.userId, action: 'profile.complete', data: { referral: !!b.referralCode } });
+      // An invite code only counts on the first setup.
+      if (b.referralCode && !again) await applyReferral(c, this.ledger, auth.userId, b.referralCode);
+      await audit(c, { actorType: 'USER', actorId: auth.userId, action: again ? 'profile.update' : 'profile.complete', data: { referral: !!b.referralCode && !again } });
     });
     return this.profile(auth.userId);
   }
