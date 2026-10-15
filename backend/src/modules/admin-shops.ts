@@ -122,7 +122,7 @@ export class AdminShopsController {
       for (const w of b.workers) {
         if (names.has(w.username)) throw new AppError(409, 'USERNAME_TAKEN', 'This username is already used', { username: w.username });
         names.add(w.username);
-        await createWorker(c, { businessId: bid, name: w.name, username: w.username, password: w.password, canRedeem: w.canRedeem, by: a.userId });
+        await createWorker(c, { businessId: bid, name: w.name, username: w.username, password: w.password, pin: w.pin, canRedeem: w.canRedeem, by: a.userId });
       }
       if (b.managerAccess) {
         await c.query(`INSERT INTO admins(user_id, role) VALUES ($1, 'SHOP') ON CONFLICT (user_id) DO NOTHING`, [user.id]);

@@ -21,6 +21,8 @@ export const zUsername = z
   .toLowerCase()
   .regex(/^[a-z0-9][a-z0-9._-]{2,31}$/, 'Use 3 to 32 English letters, numbers, dot, dash or underscore');
 export const zPassword = z.string().min(8, 'At least 8 characters').max(72);
+/** Counter PIN for a shared shop tablet: the worker taps their name and types it. */
+export const zPin = z.string().regex(/^\d{4,6}$/, 'Use 4 to 6 digits');
 
 const MAX_FAILURES = 5;
 const LOCK_MINUTES = 15;
@@ -32,6 +34,7 @@ export const zWorker = z.strictObject({
   name: z.string().trim().min(1).max(60),
   username: zUsername,
   password: zPassword,
+  pin: zPin.optional(),
   branchId: zUuid.optional(),
   canRedeem: z.boolean().optional(),
 });
@@ -39,6 +42,7 @@ const zOwnerLogin = z.strictObject({ username: zUsername, password: zPassword.op
 const zLoginPatch = z.strictObject({
   username: zUsername.optional(),
   password: zPassword.optional(),
+  pin: zPin.optional(),
   active: z.boolean().optional(),
   name: z.string().trim().min(1).max(60).optional(),
   canRedeem: z.boolean().optional(),
@@ -67,7 +71,10 @@ export async function createOwnerLogin(c: Tx, x: { businessId: string; userId: s
 }
 
 /** Creates a worker (counter staff) with a login. Returns the new staff id. */
-export async function createWorker(c: Tx, x: { businessId: string; branchId?: string; name: string; username: string; password: string; canRedeem?: boolean; by: string }) {
+export async function createWorker(
+  c: Tx,
+  x: { businessId: string; branchId?: string; name: string; username: string; password: string; pin?: string; canRedeem?: boolean; by: string },
+) {
   await assertFree(c, x.username);
   const branchId =
     x.branchId ??
@@ -76,11 +83,12 @@ export async function createWorker(c: Tx, x: { businessId: string; branchId?: st
   const ok = (await c.query(`SELECT 1 FROM branches WHERE id = $1 AND business_id = $2`, [branchId, x.businessId])).rowCount;
   if (!ok) throw Errors.notFound('Branch');
   const staffId = (
-    await c.query(`INSERT INTO staff(business_id, branch_id, name, can_redeem) VALUES ($1,$2,$3,$4) RETURNING id`, [
+    await c.query(`INSERT INTO staff(business_id, branch_id, name, can_redeem, pin_hash) VALUES ($1,$2,$3,$4,$5) RETURNING id`, [
       x.businessId,
       branchId,
       x.name,
       x.canRedeem ?? true,
+      x.pin ? await hash(x.pin) : null,
     ])
   ).rows[0].id as string;
   await c.query(
@@ -122,6 +130,7 @@ export class AdminLoginsController {
       ),
       this.db.query(
         `SELECT s.id AS staff_id, s.name, s.active AS staff_active, s.can_redeem, br.name AS branch_name, s.branch_id,
+                (s.pin_hash IS NOT NULL AND s.pin_hash NOT LIKE 'no-pin:%') AS has_pin,
                 l.id AS login_id, l.username, l.active AS login_active, l.last_login_at
            FROM staff s JOIN branches br ON br.id = s.branch_id
            LEFT JOIN business_logins l ON l.staff_id = s.id
@@ -143,6 +152,7 @@ export class AdminLoginsController {
         username: w.username ?? null,
         active: w.login_id ? w.login_active && w.staff_active : w.staff_active,
         canRedeem: w.can_redeem,
+        hasPin: !!w.has_pin,
         branchId: w.branch_id,
         branchName: w.branch_name,
         lastLoginAt: w.last_login_at ?? null,
@@ -196,6 +206,9 @@ export class AdminLoginsController {
     await this.db.tx(async (c) => {
       const s = (await c.query(`SELECT id FROM staff WHERE id = $1 AND business_id = $2 FOR UPDATE`, [sid, bid])).rows[0];
       if (!s) throw Errors.notFound('Worker');
+      if (b.pin) {
+        await c.query(`UPDATE staff SET pin_hash = $2, pin_failures = 0, locked_until = NULL WHERE id = $1`, [sid, await hash(b.pin)]);
+      }
       if (b.name !== undefined || b.canRedeem !== undefined || b.active !== undefined) {
         await c.query(`UPDATE staff SET name = COALESCE($2, name), can_redeem = COALESCE($3, can_redeem), active = COALESCE($4, active) WHERE id = $1`, [
           sid,
@@ -224,7 +237,7 @@ export class AdminLoginsController {
       if (b.active === false) {
         await c.query(`UPDATE devices SET status = 'REVOKED' WHERE business_id = $1 AND staff_id = $2`, [bid, sid]);
       }
-      await audit(c, { actorType: 'USER', actorId: a.userId, businessId: bid, action: 'admin.login.worker.update', entityId: sid, data: { ...b, password: b.password ? 'changed' : undefined }, ip });
+      await audit(c, { actorType: 'USER', actorId: a.userId, businessId: bid, action: 'admin.login.worker.update', entityId: sid, data: { ...b, password: b.password ? 'changed' : undefined, pin: b.pin ? 'changed' : undefined }, ip });
     });
     return { ok: true };
   }

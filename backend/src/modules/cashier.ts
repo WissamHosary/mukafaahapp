@@ -118,7 +118,11 @@ export class CashierController {
     const s = await this.db.one(`SELECT * FROM staff WHERE id = $1 AND branch_id = $2 AND active AND role = 'CASHIER'`, [b.staffId, d.branch_id]);
     if (!s) throw Errors.unauthorized();
     if (s.locked_until && new Date(s.locked_until) > new Date()) throw new AppError(423, 'STAFF_LOCKED', 'Too many wrong PINs');
-    const ok = await verifyPin(s.pin_hash, b.pin);
+    // Workers created with only a username and password have no counter PIN yet.
+    if (!s.pin_hash || String(s.pin_hash).startsWith('no-pin:')) {
+      throw new AppError(409, 'NO_PIN', 'No counter PIN yet. Ask the owner or Mukafaah to set one.');
+    }
+    const ok = await verifyPin(s.pin_hash, b.pin).catch(() => false);
     if (!ok) {
       const fails = s.pin_failures + 1;
       await this.db.query(

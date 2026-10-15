@@ -821,7 +821,7 @@ svg.chart .area { animation: fade .6s .25s both; }
 .pw .in { flex: 1; min-width: 0; letter-spacing: .02em; }
 .unote { display: block; font-size: 12px; margin-top: 4px; color: var(--ink-3, #857B8E); min-height: 14px; }
 .unote.ok { color: #17895E; } .unote.bad { color: #C8303F; }
-.wrow { display: grid; grid-template-columns: 1fr 1fr 1.2fr auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+.wrow { display: grid; grid-template-columns: 1fr 1fr 1.2fr .8fr auto; gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
 .wrow:first-child { border-top: 0; padding-top: 0; }
 .wrow > .btn { margin-top: 26px; }
 .ns-pv .lbl { display: block; font-size: 12px; color: var(--ink-3, #857B8E); margin-bottom: 8px; }

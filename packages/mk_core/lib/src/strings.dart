@@ -77,6 +77,7 @@ class S {
         'NOT_ACCEPTED_HERE' => tr('هالنقاط ما بتنصرف بهالمحل', "These points can't be used here"),
         'REDEEM_NOT_ALLOWED' => tr('ما عندك صلاحية الصرف', "You're not allowed to redeem"),
         'PIN_INVALID' => tr('الرمز السري غلط', 'Wrong PIN'),
+        'NO_PIN' => tr('ما في رمز سري إلك بعد. خلي صاحب المحل أو مكافأة يحطولك واحد.', 'No counter PIN yet. Ask the owner or Mukafaah to set one.'),
         'STAFF_LOCKED' => tr('الحساب مقفول ١٥ دقيقة', 'Locked for 15 minutes'),
         'PAIRING_CODE_INVALID' => tr('رمز الربط غلط أو منتهي', 'Pairing code is wrong or expired'),
         'DEVICE_NOT_PAIRED' => tr('هالجهاز مش مربوط', 'This device is not paired'),

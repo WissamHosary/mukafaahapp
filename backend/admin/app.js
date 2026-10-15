@@ -64,6 +64,7 @@
     handshake: '<path d="M11 17l2 2a1.4 1.4 0 0 0 2-2"/><path d="M14 14l2.5 2.5a1.4 1.4 0 0 0 2-2L15 11"/><path d="M3 11l4-4 5 1 3-2 6 5-3 3"/><path d="M3 11l5 5a1.4 1.4 0 0 0 2-2"/>',
     star: '<path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
     userplus: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/>',
+    lock: '<rect x="5" y="10" width="14" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/>',
     send: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
     calendar: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
@@ -645,11 +646,19 @@
     });
   }
   /** Shows the new logins once so they can be given to the shop. */
+  /** A 4-digit counter PIN that isn't too easy (no 1111, 1234...). */
+  function genPin() {
+    for (;;) {
+      const p = String(crypto.getRandomValues(new Uint32Array(1))[0] % 10000).padStart(4, '0');
+      if (!/^(\d)\1+$/.test(p) && !'0123456789'.includes(p) && !'9876543210'.includes(p)) return p;
+    }
+  }
+  const PIN_RE = /^\d{4,6}$/;
   function showCredentials(shopName, list, after) {
-    const text = [`Mukafaah Business: ${shopName}`, ...list.map((x) => `${x.role}: ${x.name ? x.name + ' · ' : ''}username ${x.username} · password ${x.password}`), 'Download "Mukafaah Business" and sign in with these.'].join('\n');
+    const text = [`Mukafaah Business: ${shopName}`, ...list.map((x) => `${x.role}: ${x.name ? x.name + ' · ' : ''}${x.username ? `username ${x.username} · password ${x.password}` : ''}${x.pin ? `${x.username ? ' · ' : ''}counter PIN ${x.pin}` : ''}`), 'Download "Mukafaah Business" and sign in with these. On a shared counter tablet, tap your name and type your PIN.'].join('\n');
     const f = modal('Logins ready', `
       <div class="alert info">${ic('info', 'sm')}<div>Give these to the shop. For safety, passwords are shown only now. You can set a new one any time in Team &amp; logins.</div></div>
-      <div class="creds">${list.map((x) => `<div class="cred"><span class="role ${x.role === 'Owner' ? 'o' : ''}">${esc(x.role)}</span><b>${esc(x.name || '')}</b><div class="kv"><small>Username</small><code>${esc(x.username)}</code></div><div class="kv"><small>Password</small><code>${esc(x.password)}</code></div></div>`).join('')}</div>
+      <div class="creds">${list.map((x) => `<div class="cred"><span class="role ${x.role === 'Owner' ? 'o' : ''}">${esc(x.role)}</span><b>${esc(x.name || '')}</b>${x.username ? `<div class="kv"><small>Username</small><code>${esc(x.username)}</code></div><div class="kv"><small>Password</small><code>${esc(x.password)}</code></div>` : ''}${x.pin ? `<div class="kv"><small>Counter PIN</small><code>${esc(x.pin)}</code></div>` : ''}</div>`).join('')}</div>
       <button type="button" class="btn sec" id="copyAll" style="width:100%">${ic('copy', 'sm')} Copy all</button>`,
     async () => { if (after) after(); }, { save: 'Done' });
     $('#copyAll', f).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied. Paste it in WhatsApp to the owner.'); } catch { toast('Couldn’t copy here', true); } };
@@ -720,11 +729,12 @@
         <label class="f"><span>Name</span><input class="in" data-w="name" value="${esc(w.name)}" maxlength="60" placeholder="Worker name"></label>
         <label class="f"><span>Username</span><input class="in mono" data-w="username" value="${esc(w.username)}" maxlength="32" spellcheck="false"><small class="unote" data-un></small></label>
         <label class="f"><span>Password</span><div class="pw"><input class="in mono" data-w="password" value="${esc(w.password)}" spellcheck="false"><button type="button" class="btn ghost sm" data-wgen title="New password">${ic('refresh', 'sm')}</button></div></label>
+        <label class="f"><span>Counter PIN</span><div class="pw"><input class="in mono" data-w="pin" value="${esc(w.pin)}" inputmode="numeric" maxlength="6" spellcheck="false" aria-label="Counter PIN, 4 to 6 digits"><button type="button" class="btn ghost sm" data-wpin title="New PIN">${ic('refresh', 'sm')}</button></div></label>
         <button type="button" class="btn ghost icon sm" data-wdel aria-label="Remove worker">${ic('trash', 'sm')}</button></div>`).join('') : `<div class="empty-s muted">No workers yet. The owner can also use the counter from their own login.</div>`;
       $$('.wrow', f).forEach((row) => wireUsername($('[data-w="username"]', row), $('[data-un]', row)));
       preview();
     };
-    $('#addW', f).onclick = () => { workers.push({ name: '', username: '', password: genPassword(), touched: false }); drawWorkers(); $$('.wrow [data-w="name"]', f).pop()?.focus(); };
+    $('#addW', f).onclick = () => { workers.push({ name: '', username: '', password: genPassword(), pin: genPin(), touched: false }); drawWorkers(); $$('.wrow [data-w="name"]', f).pop()?.focus(); };
     $('#wl', f).addEventListener('input', (e) => {
       const row = e.target.closest('.wrow'); if (!row) return; const w = workers[Number(row.dataset.i)]; const k = e.target.dataset.w;
       w[k] = e.target.value;
@@ -736,6 +746,7 @@
       const row = e.target.closest('.wrow'); if (!row) return; const i = Number(row.dataset.i);
       if (e.target.closest('[data-wdel]')) { workers.splice(i, 1); drawWorkers(); }
       if (e.target.closest('[data-wgen]')) { workers[i].password = genPassword(); $('[data-w="password"]', row).value = workers[i].password; }
+      if (e.target.closest('[data-wpin]')) { workers[i].pin = genPin(); $('[data-w="pin"]', row).value = workers[i].pin; }
     });
     function preview() {
       const logo = $('[data-drop=logoMediaId] img', f)?.getAttribute('src'); const cover = $('[data-drop=coverMediaId] img', f)?.getAttribute('src');
@@ -757,7 +768,8 @@
       const ou = val(f, 'ownerUsername').toLowerCase(); const op = val(f, 'ownerPassword');
       if (ou && !USER_RE.test(ou)) { toast('Check the owner’s username.', true); return; }
       if (ou && op.length < 8) { toast('Passwords need at least 8 characters.', true); return; }
-      const ws = workers.map((w) => ({ name: w.name.trim(), username: w.username.trim().toLowerCase(), password: w.password }));
+      const ws = workers.map((w) => ({ name: w.name.trim(), username: w.username.trim().toLowerCase(), password: w.password, ...(w.pin ? { pin: w.pin.trim() } : {}) }));
+      if (ws.some((w) => w.pin && !PIN_RE.test(w.pin))) { toast('Counter PINs are 4 to 6 digits.', true); return; }
       const bad = ws.find((w) => !w.name || !USER_RE.test(w.username) || w.password.length < 8);
       if (bad) { toast('Each worker needs a name, a username and a password of 8+ characters.', true); return; }
       const body = {
@@ -776,7 +788,7 @@
         const r = await api('POST', '/v1/admin/shops', body);
         S.shops = [];
         const go = () => { location.hash = 'shop/' + r.id + (body.storeEnabled ? '/store' : '/overview'); };
-        const creds = [...(ou ? [{ role: 'Owner', name: val(f, 'ownerName'), username: ou, password: op }] : []), ...ws.map((w) => ({ role: 'Worker', name: w.name, username: w.username, password: w.password }))];
+        const creds = [...(ou ? [{ role: 'Owner', name: val(f, 'ownerName'), username: ou, password: op }] : []), ...ws.map((w) => ({ role: 'Worker', name: w.name, username: w.username, password: w.password, pin: w.pin }))];
         toast('Shop created');
         if (creds.length) showCredentials(body.name, creds, go); else go();
       } catch (err) { fail(err); } finally { btn.disabled = false; }
@@ -1349,11 +1361,12 @@
       <div class="card"><div class="card-h"><h3>Owner login</h3><span class="sp"></span>${o ? `<button class="btn sec sm" id="ownerEdit">${ic('key', 'sm')} Change username or password</button>` : `<button class="btn sm" id="ownerEdit">${ic('plus', 'sm')} Create owner login</button>`}</div>
         <div class="card-b">${o ? `<div class="loginrow"><span class="avatar">${esc(initials(o.name || shop.name))}</span><div class="t"><b>${esc(o.name || 'Owner')}</b><small>Username <code>${esc(o.username)}</code> · ${o.lastLoginAt ? 'last signed in ' + esc(when(o.lastLoginAt)) : 'not signed in yet'}</small></div>${o.active ? '<span class="pill ok">Active</span>' : '<span class="pill">Off</span>'}</div>` : `<p class="muted" style="margin:0">The owner has no username yet. Create one so they can sign in to Mukafaah Business.</p>`}</div></div>
       <div class="card flush"><div class="card-h"><h3>Workers</h3><span class="sp"></span><button class="btn sm" id="addW">${ic('plus', 'sm')} Add worker</button></div>
-      <div class="tw nomax"><table class="tbl"><thead><tr><th>Worker</th><th>Username</th><th>Branch</th><th>Can redeem</th><th>Active</th><th></th></tr></thead><tbody>
+      <div class="tw nomax"><table class="tbl"><thead><tr><th>Worker</th><th>Username</th><th>Counter PIN</th><th>Branch</th><th>Can redeem</th><th>Active</th><th></th></tr></thead><tbody>
       ${L.workers.map((w) => `<tr data-id="${esc(w.staffId)}"><td><div class="who"><span class="avatar lt">${esc(initials(w.name))}</span><div class="t"><b>${esc(w.name)}</b><small class="muted">${w.lastLoginAt ? 'Last signed in ' + esc(when(w.lastLoginAt)) : w.username ? 'Not signed in yet' : 'Counter PIN only'}</small></div></div></td>
-        <td>${w.username ? `<code>${esc(w.username)}</code>` : '<span class="muted">—</span>'}</td><td>${esc(w.branchName)}</td>
+        <td>${w.username ? `<code>${esc(w.username)}</code>` : '<span class="muted">—</span>'}</td>
+        <td>${w.hasPin ? `<span class="pill ok">${ic('lock', 'xs')} Set</span>` : '<span class="pill y">Not set</span>'}</td><td>${esc(w.branchName)}</td>
         <td>${toggle('r', w.canRedeem, 'data-redeem aria-label="Can redeem"')}</td><td>${toggle('a', w.active, 'data-active aria-label="Active"')}</td>
-        <td><div class="acts"><button class="btn ghost sm" data-login>${ic('key', 'sm')} ${w.username ? 'New password' : 'Create login'}</button></div></td></tr>`).join('') || `<tr><td colspan="6">${empty('users', 'No workers yet', 'Add workers so they can give points from their own phones.')}</td></tr>`}
+        <td><div class="acts"><button class="btn ghost sm" data-pin>${ic('lock', 'sm')} ${w.hasPin ? 'New PIN' : 'Set PIN'}</button><button class="btn ghost sm" data-login>${ic('key', 'sm')} ${w.username ? 'New password' : 'Create login'}</button></div></td></tr>`).join('') || `<tr><td colspan="7">${empty('users', 'No workers yet', 'Add workers so they can give points from their own phones.')}</td></tr>`}
       </tbody></table></div></div>
       <div class="card flush"><div class="card-h"><h3>Signed-in phones</h3><span class="sp"></span><button class="btn ghost sm" id="pair">${ic('key', 'sm')} Pair a shared counter</button></div>${t.devices.length ? `<div class="tw nomax"><table class="tbl"><tbody>${t.devices.map((d) => `<tr data-dev="${esc(d.id)}"><td><b>${esc(d.label)}</b><div class="muted">${esc(d.branch_name || d.branchName || '')}</div></td><td>${d.status === 'ACTIVE' ? '<span class="pill ok">Active</span>' : '<span class="pill">Signed out</span>'}</td><td class="muted">${d.last_seen_at || d.lastSeenAt ? 'Last seen ' + esc(day(d.last_seen_at || d.lastSeenAt)) : ''}</td><td><div class="acts">${d.status === 'ACTIVE' ? `<button class="btn danger sm" data-revoke>Sign out</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>` : `<div style="padding:0 20px 20px" class="muted">No phones yet. They show here after a worker signs in.</div>`}</div>`;
     const branchSel = (cur) => `<label class="f"><span>Branch</span><select class="in" name="branchId">${L.branches.map((b) => opt(b.id, b.name, cur || L.branches[0]?.id)).join('')}</select></label>`;
@@ -1374,13 +1387,17 @@
     $('#addW', ws).onclick = () => {
       const f = modal('Add worker', `<label class="f"><span>Name</span><input class="in" name="name" maxlength="60" required placeholder="Rami"></label>
         <label class="f"><span>Username</span><input class="in mono" name="username" maxlength="32" spellcheck="false"><small class="unote" id="un"></small></label>
-        ${pwField('password', genPassword())}${branchSel()}
+        ${pwField('password', genPassword())}
+        <label class="f"><span>Counter PIN</span><input class="in mono" name="pin" value="${genPin()}" inputmode="numeric" maxlength="6"><em>4 to 6 digits, for a shared counter tablet: the worker taps their name and types it.</em></label>
+        ${branchSel()}
         <div class="optcard"><div class="swrow">${toggle('canRedeem', true)}<div class="t"><b>Can redeem points</b><small>Off: this worker can only give points.</small></div></div></div>`,
       async (form) => {
-        const body = { name: val(form, 'name'), username: val(form, 'username').toLowerCase(), password: val(form, 'password'), branchId: val(form, 'branchId'), canRedeem: form.elements.canRedeem.checked };
+        const pin = val(form, 'pin');
+        const body = { name: val(form, 'name'), username: val(form, 'username').toLowerCase(), password: val(form, 'password'), ...(pin ? { pin } : {}), branchId: val(form, 'branchId'), canRedeem: form.elements.canRedeem.checked };
         if (!body.name || !USER_RE.test(body.username) || body.password.length < 8) { toast('Add a name, a username and a password of 8+ characters.', true); return false; }
+        if (pin && !PIN_RE.test(pin)) { toast('The counter PIN is 4 to 6 digits.', true); return false; }
         await api('POST', `/v1/admin/shops/${shop.id}/logins/workers`, body);
-        showCredentials(shop.name, [{ role: 'Worker', name: body.name, username: body.username, password: body.password }], reloadTab);
+        showCredentials(shop.name, [{ role: 'Worker', name: body.name, username: body.username, password: body.password, pin }], reloadTab);
       }, { size: 'sm' });
       wirePw(f); wireUsername(f.elements.username, $('#un', f));
       let touched = false; f.elements.username.addEventListener('input', () => (touched = true));
@@ -1391,6 +1408,16 @@
     ws.addEventListener('click', async (e) => {
       const tr = e.target.closest('tr'); if (!tr) return;
       const w = L.workers.find((x) => x.staffId === tr.dataset.id);
+      if (w && e.target.closest('[data-pin]')) {
+        modal(`Counter PIN for ${w.name}`, `<label class="f"><span>New PIN</span><input class="in mono" name="pin" value="${genPin()}" inputmode="numeric" maxlength="6" style="font-size:22px;letter-spacing:.3em;text-align:center"><em>4 to 6 digits. On a shared counter tablet the worker taps their name and types it. The old PIN stops working.</em></label>`,
+          async (form) => {
+            const pin = val(form, 'pin');
+            if (!PIN_RE.test(pin)) { toast('The PIN is 4 to 6 digits.', true); return false; }
+            await api('PATCH', `/v1/admin/shops/${shop.id}/logins/workers/${w.staffId}`, { pin });
+            showCredentials(shop.name, [{ role: 'Worker', name: w.name, pin }], reloadTab);
+          }, { size: 'sm', save: 'Save PIN' });
+        return;
+      }
       if (w && e.target.closest('[data-login]')) {
         const f = modal(w.username ? `New password for ${w.name}` : `Login for ${w.name}`, `${w.username ? '' : `<label class="f"><span>Username</span><input class="in mono" name="username" value="${esc(slug(shop.name.split(' ')[0], w.name.split(' ')[0]))}" maxlength="32"><small class="unote" id="un"></small></label>`}${pwField('password', genPassword())}`,
           async (form) => {
