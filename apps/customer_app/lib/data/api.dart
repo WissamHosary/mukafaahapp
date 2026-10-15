@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:mk_core/mk_core.dart';
 
 // ---------- Models (immutable, parsed from server JSON) ----------
@@ -13,6 +15,7 @@ class AppUser {
     this.signInMethod = 'PHONE',
     this.needsProfile = false,
     this.hasPassword = false,
+    this.avatarUrl,
   });
   factory AppUser.fromJson(Map<String, dynamic> j, {bool? needsProfile}) => AppUser(
         id: j['id'] as String,
@@ -24,6 +27,7 @@ class AppUser {
         signInMethod: j['signInMethod'] as String? ?? (j['email'] != null && j['phoneLast4'] == null ? 'GOOGLE' : 'PHONE'),
         needsProfile: needsProfile ?? j['needsProfile'] as bool? ?? false,
         hasPassword: j['hasPassword'] as bool? ?? false,
+        avatarUrl: j['avatarUrl'] as String?,
       );
   final String id;
   final String? name;
@@ -44,6 +48,9 @@ class AppUser {
 
   /// Phone members sign back in with their number and this password.
   final bool hasPassword;
+
+  /// Profile photo; null shows the Mukafaah avatar for their gender.
+  final String? avatarUrl;
 
   bool get isGoogle => signInMethod == 'GOOGLE';
 }
@@ -514,6 +521,7 @@ class ShopDetail {
     this.banners = const [],
     this.reviews = const [],
     this.starCounts = const [0, 0, 0, 0, 0],
+    this.group,
   });
   factory ShopDetail.fromJson(Json j) => ShopDetail(
         card: ShopCard.fromJson(j),
@@ -528,6 +536,7 @@ class ShopDetail {
         reviews: ((j['reviews'] as List?) ?? const []).map((e) => ShopReview.fromJson(e as Json)).toList(),
         starCounts: ((j['starCounts'] as List?) ?? const [0, 0, 0, 0, 0]).map((e) => (e as num).toInt()).toList(),
         myComment: _s((j['myRating'] as Map?)?['comment']),
+        group: j['group'] == null ? null : PointsGroup.fromJson((j['group'] as Map).cast<String, dynamic>()),
         storeEnabled: j['storeEnabled'] == true,
         branches: ((j['branches'] as List?) ?? const []).map((e) => e.toString()).toList(),
         offers: ((j['offers'] as List?) ?? const []).map((e) => Offer.fromJson(e as Json)).toList(),
@@ -555,6 +564,29 @@ class ShopDetail {
 
   /// How many reviews gave 1, 2, 3, 4 and 5 stars.
   final List<int> starCounts;
+
+  /// Shared / Network group this shop belongs to (null for In-Store shops).
+  final PointsGroup? group;
+}
+
+class PointsGroup {
+  const PointsGroup({required this.name, required this.type, required this.shops, this.maxPercent = 100, this.maxPoints});
+  factory PointsGroup.fromJson(Json j) => PointsGroup(
+        name: j['name'] as String? ?? '',
+        type: j['type'] as String? ?? 'SHARED',
+        shops: (j['shops'] as num?)?.toInt() ?? 0,
+        maxPercent: (j['maxPercent'] as num?)?.toInt() ?? 100,
+        maxPoints: (j['maxPoints'] as num?)?.toInt(),
+      );
+  final String name;
+
+  /// SHARED or NETWORK.
+  final String type;
+  final int shops;
+
+  /// Network: the most of a customer's points this shop takes per visit.
+  final int maxPercent;
+  final int? maxPoints;
 }
 
 class ShopSocial {
@@ -1164,6 +1196,12 @@ class CustomerApi {
       passwordToken: d['passwordToken'] as String?,
     );
   }
+
+  /// Profile photo (JPG/PNG/WebP bytes). Returns the updated member.
+  Future<AppUser> setAvatar(List<int> bytes) async =>
+      AppUser.fromJson(await client.post<Map<String, dynamic>>('/v1/customer/avatar', data: {'dataBase64': base64Encode(bytes)}));
+
+  Future<AppUser> removeAvatar() async => AppUser.fromJson(await client.delete<Map<String, dynamic>>('/v1/customer/avatar'));
 
   /// Is this number already a member, and do they have a password?
   Future<PhoneStatus> checkPhone(String phone) async {

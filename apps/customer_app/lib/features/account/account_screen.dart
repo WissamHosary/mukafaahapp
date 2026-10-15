@@ -1,12 +1,14 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mk_core/mk_core.dart';
 import 'package:mk_ui/mk_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/providers.dart';
+import '../../data/api.dart';
 import '../auth/auth_screens.dart';
 import '../common/common.dart';
 import '../lock/biometric.dart';
@@ -154,7 +156,33 @@ class AccountScreen extends ConsumerWidget {
           MkCard(
             child: Row(
               children: [
-                MkMonogram(name: user?.name ?? 'M', size: 52),
+                Semantics(
+                  button: true,
+                  label: s.tr('صورة الحساب', 'Profile photo'),
+                  child: MkPressable(
+                    onTap: () => _changePhoto(context, ref),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        MkAvatar(photoUrl: ref.watch(mediaUrlProvider)(user?.avatarUrl), gender: user?.gender, size: 64),
+                        PositionedDirectional(
+                          end: -2,
+                          bottom: -2,
+                          child: Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: MkColors.purple900,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(Icons.photo_camera_rounded, size: 13, color: MkColors.yellow500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(width: MkSpace.md),
                 Expanded(
                   child: Column(
@@ -365,5 +393,72 @@ class _QuickUnlockTile extends ConsumerWidget {
       activeTrackColor: MkColors.success,
       onChanged: (v) => toggleQuickUnlock(context, ref, v),
     );
+  }
+}
+
+
+/// Profile photo: choose one, take one, or go back to the Mukafaah avatar.
+Future<void> _changePhoto(BuildContext context, WidgetRef ref) async {
+  final s = ref.read(stringsProvider);
+  final user = ref.read(authProvider).user;
+  final hasPhoto = (user?.avatarUrl ?? '').isNotEmpty;
+  final pick = await showMkSheet<String>(
+    context,
+    builder: (ctx) => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: MkSpace.sm),
+        Center(child: MkAvatar(photoUrl: ref.read(mediaUrlProvider)(user?.avatarUrl), gender: user?.gender, size: 84)),
+        const SizedBox(height: MkSpace.sm),
+        Text(s.tr('صورة الحساب', 'Profile photo'), textAlign: TextAlign.center, style: Theme.of(ctx).textTheme.titleLarge),
+        Text(
+          s.tr('إذا ما حطيت صورة، منحطلك صورة مكافأة.', "No photo? You get a Mukafaah avatar."),
+          textAlign: TextAlign.center,
+          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: MkColors.ink3),
+        ),
+        const SizedBox(height: MkSpace.md),
+        ListTile(
+          leading: const MkIconTile(icon: Icons.photo_library_rounded, size: 40),
+          title: Text(s.tr('اختار من الصور', 'Choose from photos')),
+          onTap: () => Navigator.of(ctx).pop('gallery'),
+        ),
+        ListTile(
+          leading: const MkIconTile(icon: Icons.photo_camera_rounded, size: 40),
+          title: Text(s.tr('صوّر هلق', 'Take a photo')),
+          onTap: () => Navigator.of(ctx).pop('camera'),
+        ),
+        if (hasPhoto)
+          ListTile(
+            leading: const MkIconTile(icon: Icons.delete_outline_rounded, size: 40, color: MkColors.danger, bg: MkColors.dangerBg),
+            title: Text(s.tr('رجّع صورة مكافأة', 'Use the Mukafaah avatar'), style: const TextStyle(color: MkColors.danger)),
+            onTap: () => Navigator.of(ctx).pop('remove'),
+          ),
+      ],
+    ),
+  );
+  if (pick == null || !context.mounted) return;
+  try {
+    final api = ref.read(apiProvider);
+    AppUser updated;
+    if (pick == 'remove') {
+      updated = await api.removeAvatar();
+    } else {
+      final file = await ImagePicker().pickImage(
+        source: pick == 'camera' ? ImageSource.camera : ImageSource.gallery,
+        maxWidth: 720,
+        maxHeight: 720,
+        imageQuality: 82,
+        preferredCameraDevice: CameraDevice.front,
+      );
+      if (file == null) return;
+      updated = await api.setAvatar(await file.readAsBytes());
+    }
+    ref.read(authProvider.notifier).updateUser(updated);
+    if (context.mounted) MkToast.show(context, s.tr('انحفظت', 'Saved'), kind: MkToastKind.success);
+  } on ApiException catch (e) {
+    if (context.mounted) MkToast.show(context, s.error(e.code), kind: MkToastKind.error);
+  } on Object {
+    if (context.mounted) MkToast.show(context, s.somethingWrong, kind: MkToastKind.error);
   }
 }

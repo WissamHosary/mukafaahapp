@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Module, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Module, Patch, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { audit } from '../platform/audit.js';
 import { Auth, IdemKey, RequireUser, type UserAuth } from '../platform/auth.js';
@@ -9,7 +9,8 @@ import { parse } from '../platform/validation.js';
 import { applyReferral } from './engage.js';
 import { LedgerService } from './ledger.js';
 import { mukafaahBalance } from './mukafaah.js';
-import { MEMBER_QR_PREFIX, memberCode } from './shared.js';
+import { saveImage } from './media.js';
+import { MEMBER_QR_PREFIX, mediaUrl, memberCode } from './shared.js';
 
 /** Older rotating QR tokens (still accepted at the counter). */
 export const QR_PREFIX = 'MKF1:';
@@ -44,7 +45,7 @@ export class CustomerController {
   private async profile(userId: string) {
     const u = await this.db.one(
       `SELECT id, name, locale, phone_last4, email, gender, birth_year, google_sub IS NOT NULL AS google,
-              password_hash IS NOT NULL AS has_password, profile_completed_at, created_at
+              password_hash IS NOT NULL AS has_password, avatar_media_id, profile_completed_at, created_at
          FROM users WHERE id = $1`,
       [userId],
     );
@@ -59,6 +60,7 @@ export class CustomerController {
       age: u.birth_year ? new Date().getFullYear() - u.birth_year : null,
       signInMethod: u.google ? 'GOOGLE' : 'PHONE',
       hasPassword: !!u.has_password,
+      avatarUrl: mediaUrl(u.avatar_media_id),
       needsProfile: !u.profile_completed_at,
       business: owns ?? null,
     };
@@ -91,6 +93,30 @@ export class CustomerController {
       // An invite code only counts on the first setup.
       if (b.referralCode && !again) await applyReferral(c, this.ledger, auth.userId, b.referralCode);
       await audit(c, { actorType: 'USER', actorId: auth.userId, action: again ? 'profile.update' : 'profile.complete', data: { referral: !!b.referralCode && !again } });
+    });
+    return this.profile(auth.userId);
+  }
+
+  /** Profile photo: upload replaces the old one; delete goes back to the Mukafaah avatar. */
+  @Post('avatar')
+  @HttpCode(200)
+  async setAvatar(@Auth() auth: UserAuth, @Body() body: unknown) {
+    const b = parse(z.strictObject({ dataBase64: z.string().min(20).max(4_500_000) }), body);
+    await this.db.tx(async (c) => {
+      const old = (await c.query(`SELECT avatar_media_id FROM users WHERE id = $1 FOR UPDATE`, [auth.userId])).rows[0]?.avatar_media_id;
+      const id = await saveImage(c, null, b.dataBase64);
+      await c.query(`UPDATE users SET avatar_media_id = $2, updated_at = now() WHERE id = $1`, [auth.userId, id]);
+      if (old) await c.query(`DELETE FROM media WHERE id = $1`, [old]);
+    });
+    return this.profile(auth.userId);
+  }
+
+  @Delete('avatar')
+  async deleteAvatar(@Auth() auth: UserAuth) {
+    await this.db.tx(async (c) => {
+      const old = (await c.query(`SELECT avatar_media_id FROM users WHERE id = $1 FOR UPDATE`, [auth.userId])).rows[0]?.avatar_media_id;
+      await c.query(`UPDATE users SET avatar_media_id = NULL, updated_at = now() WHERE id = $1`, [auth.userId]);
+      if (old) await c.query(`DELETE FROM media WHERE id = $1`, [old]);
     });
     return this.profile(auth.userId);
   }

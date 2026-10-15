@@ -231,6 +231,7 @@ class _ShopBodyState extends ConsumerState<_ShopBody> {
                             ),
                             const SizedBox(height: 6),
                             _EarnLine(percent: c.earnText),
+                            if (d.group != null) ...[const SizedBox(height: 6), _GroupLine(g: d.group!, points: c.myPoints)],
                           ],
                         ),
                       ),
@@ -375,6 +376,41 @@ class _EarnLine extends ConsumerWidget {
               style: t.labelMedium?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w700),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Shared / Network: where these points work, and how much this shop takes.
+class _GroupLine extends ConsumerWidget {
+  const _GroupLine({required this.g, required this.points});
+  final PointsGroup g;
+  final int points;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    final network = g.type == 'NETWORK';
+    final color = network ? MkColors.network : MkColors.shared;
+    final limited = network && (g.maxPercent < 100 || g.maxPoints != null);
+    final usable = !limited ? points : [(points * g.maxPercent / 100).floor(), if (g.maxPoints != null) g.maxPoints!].reduce((a, b) => a < b ? a : b);
+    final text = !network
+        ? s.tr('نقاط ${g.name} المشتركة: بتصرفها كلها بأي محل من ${g.shops} محلات', '${g.name} shared points: spend all of them at any of ${g.shops} shops')
+        : limited
+            ? s.tr('شبكة ${g.name}: هون بتصرف لحد ${g.maxPercent}% من نقاطك${g.maxPoints != null ? ' (حد ${formatPoints(g.maxPoints!)})' : ''}. يعني ${formatPoints(usable)} هلق.',
+                '${g.name} network: here you can use up to ${g.maxPercent}% of your points${g.maxPoints != null ? ' (max ${formatPoints(g.maxPoints!)})' : ''}, that is ${formatPoints(usable)} now.')
+            : s.tr('شبكة ${g.name}: نقاط وحدة بـ ${g.shops} محلات', '${g.name} network: one balance at ${g.shops} shops');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: MkRadius.all(MkRadius.md)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(network ? Icons.share_rounded : Icons.hub_rounded, size: 16, color: color),
+          const SizedBox(width: 6),
+          Expanded(child: Text(text, style: t.labelMedium?.copyWith(color: MkColors.ink2, fontWeight: FontWeight.w600))),
         ],
       ),
     );

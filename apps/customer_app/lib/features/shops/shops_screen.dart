@@ -95,8 +95,8 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
               context,
               builder: (ctx) => Text(
                 s.tr(
-                  'العضوية:\n• داخل المتجر: بتربح وبتصرف بنفس المحل.\n• مشترك: بتربح بمحل وبتصرف بمحلات تانية مشتركة.\n• شبكة: نقاط وحدة لكل فروع المجموعة.',
-                  'Programs:\n• In-Store: earn and redeem at the same shop.\n• Shared: earn at one shop, redeem at partner shops.\n• Network: one balance across a group of branches.',
+                  'كيف بتشتغل النقاط:\n\n• داخل المحل: بتجمع وبتصرف بنفس المحل.\n\n• مشترك: نفس النقاط بكل محلات المجموعة. بتشتري من محل وبتصرفها كلها بمحل تاني.\n\n• شبكة: نقاط وحدة بكل المجموعة، بس كل محل بيحدد قديش بيقبل منها بكل زيارة (مثلاً نصّ نقاطك).',
+                  'How points work:\n\n• In-Store: collect and spend at the same shop.\n\n• Shared: the same points at every shop in the group. Buy at one shop, spend all of them at another.\n\n• Network: one balance across the group, but each shop decides how much of it you can use per visit (for example half your points).',
                 ),
                 style: Theme.of(ctx).textTheme.bodyLarge,
               ),
@@ -112,37 +112,7 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
         },
         child: CustomScrollView(
           slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, 0),
-              sliver: SliverToBoxAdapter(
-                child: Row(
-                  children: [
-                    Expanded(child: MkSearchField(hint: s.search, controller: _search, onChanged: _onSearch)),
-                    const SizedBox(width: MkSpace.xs),
-                    OutlinedButton.icon(
-                      onPressed: _sortSheet,
-                      icon: const Icon(Icons.sort_rounded, size: 18),
-                      label: Text(s.tr('ترتيب', 'Sort')),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: MkSpace.md),
-              sliver: SliverToBoxAdapter(
-                child: MkTextTabs<String?>(
-                  items: [
-                    (null, s.all),
-                    ('IN_STORE', s.inStore),
-                    ('SHARED', s.shared),
-                    ('NETWORK', s.tr('شبكة', 'Network')),
-                  ],
-                  selected: _q.type,
-                  onSelected: (v) => setState(() => _q = v == null ? _q.copy(clearType: true) : _q.copy(type: v)),
-                ),
-              ),
-            ),
+            // Categories first.
             if (widget.category == null)
               SliverToBoxAdapter(
                 child: SizedBox(
@@ -169,6 +139,32 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
                   ),
                 ),
               ),
+            // How points work at these shops: In-Store, Shared, Network.
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
+              sliver: SliverToBoxAdapter(
+                child: _ProgramPicker(
+                  selected: _q.type,
+                  onSelected: (v) => setState(() => _q = v == null ? _q.copy(clearType: true) : _q.copy(type: v)),
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
+              sliver: SliverToBoxAdapter(
+                child: Row(
+                  children: [
+                    Expanded(child: MkSearchField(hint: s.search, controller: _search, onChanged: _onSearch)),
+                    const SizedBox(width: MkSpace.xs),
+                    OutlinedButton.icon(
+                      onPressed: _sortSheet,
+                      icon: const Icon(Icons.sort_rounded, size: 18),
+                      label: Text(s.tr('ترتيب', 'Sort')),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.md, MkSpace.lg, MkSpace.sm),
               sliver: SliverToBoxAdapter(
@@ -217,6 +213,89 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+
+/// In-Store / Shared / Network as three big choices, with what each one means.
+class _ProgramPicker extends ConsumerWidget {
+  const _ProgramPicker({required this.selected, required this.onSelected});
+  final String? selected;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    final items = [
+      ('IN_STORE', s.inStore, Icons.storefront_rounded, MkColors.inStore, s.tr('بتجمع وبتصرف بنفس المحل', 'Collect and spend at the same shop')),
+      ('SHARED', s.shared, Icons.hub_rounded, MkColors.shared, s.tr('نفس النقاط بكل المحلات: اشتري من محل واصرف بتاني', 'Same points at every shop: buy at one, spend at another')),
+      ('NETWORK', s.tr('شبكة', 'Network'), Icons.share_rounded, MkColors.network, s.tr('نقاط وحدة، وكل محل بيحدد قديش بيقبل', 'One balance; each shop sets how much it takes')),
+    ];
+    final sel = items.where((x) => x.$1 == selected).firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            for (final (i, x) in items.indexed) ...[
+              if (i > 0) const SizedBox(width: MkSpace.xs),
+              Expanded(
+                child: Semantics(
+                  selected: selected == x.$1,
+                  button: true,
+                  child: MkPressable(
+                    onTap: () => onSelected(selected == x.$1 ? null : x.$1),
+                    child: AnimatedContainer(
+                      duration: MkMotion.base,
+                      curve: MkMotion.standard,
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+                      decoration: BoxDecoration(
+                        color: selected == x.$1 ? x.$4 : Colors.white,
+                        borderRadius: MkRadius.all(MkRadius.lg),
+                        border: Border.all(color: selected == x.$1 ? x.$4 : MkColors.line),
+                        boxShadow: selected == x.$1 ? [BoxShadow(color: x.$4.withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 6))] : null,
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(x.$3, color: selected == x.$1 ? MkColors.yellow500 : x.$4, size: 24),
+                          const SizedBox(height: 4),
+                          Text(
+                            x.$2,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: t.labelLarge?.copyWith(fontWeight: FontWeight.w800, color: selected == x.$1 ? Colors.white : MkColors.ink),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        AnimatedSize(
+          duration: MkMotion.base,
+          child: sel == null
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.only(top: MkSpace.xs),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(color: sel.$4.withValues(alpha: 0.08), borderRadius: MkRadius.all(MkRadius.md)),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded, size: 16, color: sel.$4),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(sel.$5, style: t.bodySmall?.copyWith(color: MkColors.ink2, fontWeight: FontWeight.w600))),
+                      ],
+                    ),
+                  ),
+                ),
+        ),
+      ],
     );
   }
 }

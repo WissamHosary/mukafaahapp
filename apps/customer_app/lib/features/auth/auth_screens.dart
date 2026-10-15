@@ -1150,6 +1150,7 @@ class _SetPasswordScreenState extends ConsumerState<SetPasswordScreen> {
                 signInMethod: u.signInMethod,
                 needsProfile: u.needsProfile,
                 hasPassword: true,
+                avatarUrl: u.avatarUrl,
               ),
             );
       }

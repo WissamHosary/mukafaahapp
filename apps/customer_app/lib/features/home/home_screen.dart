@@ -224,21 +224,7 @@ class _CoinHeader extends ConsumerWidget {
                       children: [
                         MkPressable(
                           onTap: () => context.go('/profile'),
-                          child: Container(
-                            width: 44,
-                            height: 44,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: const LinearGradient(colors: [MkColors.purple500, MkColors.purple900]),
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 2),
-                              boxShadow: const [BoxShadow(color: MkColors.yellow500, spreadRadius: 2)],
-                            ),
-                            child: Text(
-                              first.isEmpty ? 'M' : first.characters.first.toUpperCase(),
-                              style: t.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800),
-                            ),
-                          ),
+                          child: MkAvatar(photoUrl: ref.watch(mediaUrlProvider)(user?.avatarUrl), gender: user?.gender, size: 46),
                         ),
                         const SizedBox(width: MkSpace.sm),
                         Expanded(

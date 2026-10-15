@@ -143,6 +143,11 @@ function Patch-Android($appDir, $label, [bool]$camera, [bool]$location = $false)
       $p = ([regex]'<dict>').Replace((Get-Content $plist -Raw), "<dict>`n`t<key>NSFaceIDUsageDescription</key>`n`t<string>Unlock your Mukafaah wallet with Face ID.</string>", 1)
       [System.IO.File]::WriteAllText($plist, $p, (New-Object System.Text.UTF8Encoding($false)))
     }
+    # iPhone: choosing a profile photo needs a reason too.
+    if ((Test-Path $plist) -and -not ((Get-Content $plist -Raw) -match 'NSPhotoLibraryUsageDescription')) {
+      $p = ([regex]'<dict>').Replace((Get-Content $plist -Raw), "<dict>`n`t<key>NSPhotoLibraryUsageDescription</key>`n`t<string>Choose a profile photo for your Mukafaah account.</string>`n`t<key>NSCameraUsageDescription</key>`n`t<string>Take a profile photo for your Mukafaah account.</string>", 1)
+      [System.IO.File]::WriteAllText($plist, $p, (New-Object System.Text.UTF8Encoding($false)))
+    }
   }
   foreach ($g in @('android\app\build.gradle.kts', 'android\app\build.gradle')) {
     $gp = Join-Path $appDir $g

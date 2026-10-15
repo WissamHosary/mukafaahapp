@@ -1,6 +1,7 @@
 /// Mukafaah design system.
 library;
 
+export 'src/avatar.dart';
 export 'src/brand.dart';
 export 'src/coin.dart';
 export 'src/catalog_widgets.dart';
