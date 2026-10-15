@@ -3,6 +3,7 @@ library;
 
 export 'src/avatar.dart';
 export 'src/brand.dart';
+export 'src/card_art.dart';
 export 'src/coin.dart';
 export 'src/catalog_widgets.dart';
 export 'src/components.dart';

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:material_ui/material_ui.dart';
 
+import 'coin.dart';
 import 'tokens.dart';
 
 part 'intro_logo_data.dart';
@@ -13,7 +14,9 @@ part 'intro_logo_data.dart';
 /// It builds the real Mukafaah logo piece by piece:
 ///  1. two sparks trace the outline of the yellow mark from the hook tip and
 ///     meet on the far side;
-///  2. the mark fills with yellow and pops, sending out a ripple and sparkles;
+///  2. liquid gold rises inside the mark; when it is full the mark breathes
+///     once, golden rays open behind it and Mukafaah coins spring out,
+///     flip and tumble away;
 ///  3. the Arabic name is revealed right to left, the way it is read, and its
 ///     dots and hamza drop into place one by one;
 ///  4. MUKAFAAH rises letter by letter;
@@ -148,11 +151,10 @@ abstract final class _T {
   // 1. Sparks trace the mark's outline.
   static const traceStart = 0.0;
   static const traceEnd = 900.0;
-  // 2. The mark fills and pops.
+  // 2. Liquid gold fills the mark, then rays and a burst of coins.
   static const fillStart = 760.0;
   static const fillEnd = 1180.0;
-  static const popEnd = 1300.0;
-  static const rippleEnd = 1560.0;
+  static const burstEnd = 1900.0;
   // 3. Arabic name, right to left, then its dots.
   static const arabicStart = 1040.0;
   static const arabicEnd = 1720.0;
@@ -174,6 +176,17 @@ double _seg(double ms, double a, double b, [Curve curve = Curves.linear]) =>
 
 /// The logo artwork is 600 x 606; the mark's centre is about here.
 const _markCentre = Offset(296, 148);
+
+/// Coins that spring out of the mark: angle (deg), distance, size, half-turns, delay (0..1).
+const _coins = [
+  (-152.0, 330.0, 40.0, 3.0, 0.0),
+  (-120.0, 360.0, 48.0, 4.0, 0.05),
+  (-90.0, 300.0, 36.0, 3.0, 0.12),
+  (-60.0, 365.0, 46.0, 5.0, 0.02),
+  (-28.0, 330.0, 40.0, 3.0, 0.08),
+  (-174.0, 270.0, 30.0, 2.0, 0.16),
+  (-6.0, 280.0, 30.0, 2.0, 0.14),
+];
 
 class _Shape {
   const _Shape(this.contours, this.bounds);
@@ -215,6 +228,17 @@ final class _Art {
   static final instance = _Art._();
 
   final Path mark = _pathOf(_mark.first);
+  late final Rect markBounds = mark.getBounds();
+
+  /// The coin drawn once; the burst only moves and squeezes it.
+  late final ui.Image coin = () {
+    final rec = ui.PictureRecorder();
+    paintMukafaahCoin(Canvas(rec), const Offset(64, 64), 62);
+    final pic = rec.endRecording();
+    final img = pic.toImageSync(128, 128);
+    pic.dispose();
+    return img;
+  }();
   late final Path markOutline = Path().._addOutline(_mark.first.contours.first);
   late final ui.PathMetric outlineMetric = markOutline.computeMetrics().first;
   final List<Path> arabicBody = _arabicBody.map(_pathOf).toList();
@@ -266,38 +290,79 @@ class _LogoPainter extends CustomPainter {
   void _paintMark(Canvas canvas, _Art art) {
     final trace = _seg(ms, _T.traceStart, _T.traceEnd, Curves.easeInOutCubic);
     final fill = _seg(ms, _T.fillStart, _T.fillEnd, Curves.easeOutCubic);
-    final pop = math.sin(math.pi * _seg(ms, _T.fillStart, _T.popEnd));
-    final ripple = _seg(ms, _T.fillStart + 80, _T.rippleEnd, Curves.easeOutCubic);
+    final land = _seg(ms, _T.fillEnd - 40, _T.burstEnd);
+    final rays = _seg(ms, _T.fillEnd - 60, _T.burstEnd + 150, Curves.easeOutCubic);
+    const c = _markCentre;
 
     // A soft glow that blooms with the fill and stays behind the mark.
     if (fill > 0) {
       canvas.drawCircle(
-        _markCentre,
-        250,
+        c,
+        260,
         Paint()
-          ..shader = ui.Gradient.radial(_markCentre, 250, [
-            _yellow.withValues(alpha: 0.14 * fill),
+          ..shader = ui.Gradient.radial(c, 260, [
+            _yellow.withValues(alpha: 0.16 * fill),
             _yellow.withValues(alpha: 0),
           ]),
       );
     }
 
-    // Ripple ring and sparkles as the mark lands.
-    if (ripple > 0 && ripple < 1) {
-      final fade = 1 - ripple;
-      canvas.drawCircle(
-        _markCentre,
-        150 + 190 * ripple,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5 + 7 * fade
-          ..color = _yellow.withValues(alpha: 0.55 * fade),
-      );
-      for (var i = 0; i < 10; i++) {
-        final a = (i * 36 + 18) * math.pi / 180;
-        final d = 165 + 175 * ripple;
-        final c = _markCentre + Offset(math.cos(a) * d, math.sin(a) * d * 0.9);
-        _sparkle(canvas, c, 9 * fade + 1, (i.isEven ? _yellow : _purple).withValues(alpha: fade * (i.isEven ? 1 : 0.55)));
+    // Golden rays open behind the full mark and turn slowly as they fade.
+    if (rays > 0 && rays < 1) {
+      final fade = 1 - _seg(ms, _T.fillEnd + 300, _T.burstEnd + 150, Curves.easeInOutSine);
+      final rot = rays * 0.35;
+      final path = Path();
+      for (var i = 0; i < 18; i++) {
+        final a = rot + i * math.pi * 2 / 18;
+        final len = (i.isOdd ? 150 : 230) * rays + 110;
+        final w = i.isOdd ? 0.035 : 0.055;
+        path
+          ..moveTo(c.dx + math.cos(a - w) * 100, c.dy + math.sin(a - w) * 100)
+          ..lineTo(c.dx + math.cos(a) * len, c.dy + math.sin(a) * len)
+          ..lineTo(c.dx + math.cos(a + w) * 100, c.dy + math.sin(a + w) * 100)
+          ..close();
+      }
+      canvas
+        ..drawPath(
+          path,
+          Paint()
+            ..shader = ui.Gradient.radial(c, 120 + 230 * rays, [_yellow.withValues(alpha: 0.55 * fade), _yellow.withValues(alpha: 0)], [90 / (120 + 230 * rays), 1]),
+        )
+        ..drawCircle(
+          c,
+          160 + 150 * rays,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.6
+            ..color = _yellow.withValues(alpha: 0.5 * (1 - rays)),
+        );
+    }
+
+    // Mukafaah coins spring out from behind the mark, flip and fall away.
+    if (land > 0 && land < 1) {
+      final img = art.coin;
+      final src = Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble());
+      for (final (deg, dist, size, spin, delay) in _coins) {
+        final u = ((land - delay) / (1 - delay)).clamp(0.0, 1.0);
+        if (u <= 0 || u >= 1) continue;
+        final a = deg * math.pi / 180;
+        final e = Curves.easeOutCubic.transform(u);
+        final x = c.dx + math.cos(a) * dist * e;
+        final y = c.dy + math.sin(a) * dist * e + 260 * u * u;
+        final turn = math.cos(u * math.pi * spin);
+        final pop = math.min(1.0, u / 0.18);
+        final alpha = 1 - _seg(u, 0.62, 1);
+        canvas
+          ..save()
+          ..translate(x, y)
+          ..rotate((deg + 90) * math.pi / 180 * 0.25 * u)
+          ..scale(math.max(0.08, turn.abs()) * pop, pop);
+        if (turn.abs() < 0.45) {
+          canvas.drawRect(Rect.fromLTWH(-size * 0.1, -size, size * 0.2, size * 2), Paint()..color = const Color(0xFFB27E00).withValues(alpha: alpha));
+        }
+        canvas
+          ..drawImageRect(img, src, Rect.fromCircle(center: Offset.zero, radius: size), Paint()..color = Color.fromRGBO(255, 255, 255, alpha)..filterQuality = FilterQuality.medium)
+          ..restore();
       }
     }
 
@@ -327,15 +392,45 @@ class _LogoPainter extends CustomPainter {
       }
     }
 
-    // The filled mark, popping slightly as it lands.
+    // Liquid gold rising inside the mark, then the full mark breathing once.
     if (fill > 0) {
+      final breathe = 1 +
+          0.085 * math.sin(math.pi * _seg(ms, _T.fillEnd - 80, _T.fillEnd + 260, Curves.easeOutCubic)) -
+          0.025 * math.sin(math.pi * _seg(ms, _T.fillEnd + 260, _T.fillEnd + 520));
       canvas
         ..save()
-        ..translate(_markCentre.dx, _markCentre.dy)
-        ..scale(1 + 0.07 * pop)
-        ..translate(-_markCentre.dx, -_markCentre.dy)
-        ..drawPath(art.mark, Paint()..color = _yellow.withValues(alpha: fill))
-        ..restore();
+        ..translate(c.dx, c.dy)
+        ..scale(breathe)
+        ..translate(-c.dx, -c.dy);
+      if (fill < 1) {
+        final b = art.markBounds;
+        final level = b.bottom - (b.height + 30) * fill;
+        final amp = 10 * (1 - fill);
+        final wave = Path()..moveTo(b.left - 20, b.bottom + 20);
+        for (var x = b.left - 20; x <= b.right + 20; x += 12) {
+          wave.lineTo(x, level + math.sin(x * 0.028 + ms * 0.014) * amp + math.sin(x * 0.061 - ms * 0.009) * amp * 0.5);
+        }
+        wave
+          ..lineTo(b.right + 20, b.bottom + 20)
+          ..close();
+        canvas
+          ..save()
+          ..clipPath(art.mark)
+          ..drawPath(
+            wave,
+            Paint()
+              ..shader = ui.Gradient.linear(
+                Offset(0, level),
+                Offset(0, b.bottom),
+                [const Color(0xFFFFE680), _yellow, const Color(0xFFE5AE00)],
+                [0, 0.25, 1],
+              ),
+          )
+          ..restore();
+      } else {
+        canvas.drawPath(art.mark, Paint()..color = _yellow);
+      }
+      canvas.restore();
     }
   }
 
@@ -418,18 +513,6 @@ class _LogoPainter extends CustomPainter {
           ),
       )
       ..restore();
-  }
-
-  /// A small four-pointed star.
-  void _sparkle(Canvas canvas, Offset c, double r, Color color) {
-    final p = Path()
-      ..moveTo(c.dx, c.dy - r)
-      ..quadraticBezierTo(c.dx, c.dy, c.dx + r, c.dy)
-      ..quadraticBezierTo(c.dx, c.dy, c.dx, c.dy + r)
-      ..quadraticBezierTo(c.dx, c.dy, c.dx - r, c.dy)
-      ..quadraticBezierTo(c.dx, c.dy, c.dx, c.dy - r)
-      ..close();
-    canvas.drawPath(p, Paint()..color = color);
   }
 
   @override
