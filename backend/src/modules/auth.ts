@@ -12,6 +12,7 @@ import { verifyGoogleIdToken } from '../platform/google.js';
 import { parse } from '../platform/validation.js';
 import { LedgerService } from './ledger.js';
 import { grantRule } from './mukafaah.js';
+import { prettyPhone } from './shared.js';
 import { OTP_PROVIDER, otpProviderFactory, type OtpProvider } from './otp-provider.js';
 
 const OTP_TTL_SEC = 300;
@@ -72,8 +73,15 @@ const zSetPassword = z.strictObject({
 });
 
 /** What the apps need to know about the member right after signing in. */
-function signedInUser(u: Record<string, any>) {
-  return { id: u.id, name: u.name, phoneLast4: u.phone_last4 ?? null, email: u.email ?? null, hasPassword: !!u.password_hash };
+function signedInUser(u: Record<string, any>, crypto: CryptoService) {
+  return {
+    id: u.id,
+    name: u.name,
+    phoneLast4: u.phone_last4 ?? null,
+    phone: u.phone_enc ? prettyPhone(crypto.decrypt(u.phone_enc)) : null,
+    email: u.email ?? null,
+    hasPassword: !!u.password_hash,
+  };
 }
 
 @Controller('v1/auth')
@@ -208,7 +216,7 @@ export class AuthController {
         needsProfile: !user.profile_completed_at,
         needsPassword: b.app === 'CUSTOMER' && !user.password_hash,
         passwordToken,
-        user: signedInUser(user),
+        user: signedInUser(user, this.crypto),
       };
     });
     if (!out) throw new AppError(400, 'OTP_INVALID', 'Code is wrong or expired');
@@ -248,7 +256,7 @@ export class AuthController {
         needsProfile: !user.profile_completed_at,
         // Prefilled in "What should we call you?".
         suggestedName: g.givenName ?? g.name,
-        user: signedInUser(user),
+        user: signedInUser(user, this.crypto),
       };
     });
   }
@@ -315,7 +323,7 @@ export class AuthController {
       await c.query(`INSERT INTO login_attempts(kind, ip, phone_hash, ok) VALUES ('PASSWORD', $1, $2, true)`, [ip, ph]);
       const tokens = await this.createSession(c, u.id, b.app, b.deviceLabel ?? null, null);
       await audit(c, { actorType: 'USER', actorId: u.id, action: 'auth.login', data: { app: b.app, method: 'PASSWORD' }, ip });
-      return { ...tokens, isNew: false, needsProfile: !u.profile_completed_at, needsPassword: false, user: signedInUser(u) };
+      return { ...tokens, isNew: false, needsProfile: !u.profile_completed_at, needsPassword: false, user: signedInUser(u, this.crypto) };
     });
   }
 

@@ -1144,6 +1144,7 @@ class _SetPasswordScreenState extends ConsumerState<SetPasswordScreen> {
                 id: u.id,
                 name: u.name,
                 phoneLast4: u.phoneLast4,
+                phone: u.phone,
                 email: u.email,
                 gender: u.gender,
                 age: u.age,

@@ -76,17 +76,17 @@ class _QrPainter extends CustomPainter {
         if (!qr.isDark(r, c) || _inFinder(r, c, n)) continue;
         final rect = Rect.fromLTWH(c * cell, r * cell, cell, cell);
         if (coin > 0 && clear.overlaps(rect.deflate(cell * 0.3))) continue;
-        modules.addRRect(RRect.fromRectAndRadius(rect.deflate(cell * 0.06), Radius.circular(cell * 0.28)));
+        modules.addRRect(RRect.fromRectAndRadius(rect.deflate(cell * 0.025), Radius.circular(cell * 0.2)));
       }
     }
     canvas.drawPath(modules, dark);
     void eye(int r0, int c0) {
       final o = Offset(c0 * cell, r0 * cell);
-      final outer = RRect.fromRectAndRadius(o & Size.square(cell * 7), Radius.circular(cell * 2.2));
-      final inner = RRect.fromRectAndRadius((o + Offset(cell, cell)) & Size.square(cell * 5), Radius.circular(cell * 1.5));
+      final outer = RRect.fromRectAndRadius(o & Size.square(cell * 7), Radius.circular(cell * 1.5));
+      final inner = RRect.fromRectAndRadius((o + Offset(cell, cell)) & Size.square(cell * 5), Radius.circular(cell * 0.9));
       canvas.drawDRRect(outer, inner, dark);
-      final dot = RRect.fromRectAndRadius((o + Offset(cell * 2, cell * 2)) & Size.square(cell * 3), Radius.circular(cell * 1.1));
-      // The eyes stay solid: scanners find the code by them.
+      final dot = RRect.fromRectAndRadius((o + Offset(cell * 2, cell * 2)) & Size.square(cell * 3), Radius.circular(cell * 0.8));
+      // The eyes stay solid and only softly rounded: scanners find the code by them.
       canvas.drawRRect(dot, dark);
     }
 

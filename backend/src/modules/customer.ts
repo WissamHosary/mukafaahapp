@@ -10,7 +10,7 @@ import { applyReferral } from './engage.js';
 import { LedgerService } from './ledger.js';
 import { mukafaahBalance } from './mukafaah.js';
 import { saveImage } from './media.js';
-import { MEMBER_QR_PREFIX, mediaUrl, memberCode } from './shared.js';
+import { MEMBER_QR_PREFIX, mediaUrl, memberCode, prettyPhone } from './shared.js';
 
 /** Older rotating QR tokens (still accepted at the counter). */
 export const QR_PREFIX = 'MKF1:';
@@ -44,7 +44,7 @@ export class CustomerController {
 
   private async profile(userId: string) {
     const u = await this.db.one(
-      `SELECT id, name, locale, phone_last4, email, gender, birth_year, google_sub IS NOT NULL AS google,
+      `SELECT id, name, locale, phone_last4, phone_enc, email, gender, birth_year, google_sub IS NOT NULL AS google,
               password_hash IS NOT NULL AS has_password, avatar_media_id, profile_completed_at, created_at
          FROM users WHERE id = $1`,
       [userId],
@@ -55,6 +55,8 @@ export class CustomerController {
       name: u.name,
       locale: u.locale,
       phoneLast4: u.phone_last4 ?? null,
+      /** The member's own number, shown on their member card. */
+      phone: u.phone_enc ? prettyPhone(this.crypto.decrypt(u.phone_enc)) : null,
       email: u.email ?? null,
       gender: u.gender ?? null,
       age: u.birth_year ? new Date().getFullYear() - u.birth_year : null,

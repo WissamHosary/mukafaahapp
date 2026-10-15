@@ -9,6 +9,7 @@ class AppUser {
     required this.id,
     this.name,
     this.phoneLast4,
+    this.phone,
     this.email,
     this.gender,
     this.age,
@@ -21,6 +22,7 @@ class AppUser {
         id: j['id'] as String,
         name: j['name'] as String?,
         phoneLast4: j['phoneLast4'] as String?,
+        phone: j['phone'] as String?,
         email: j['email'] as String?,
         gender: j['gender'] as String?,
         age: (j['age'] as num?)?.toInt(),
@@ -32,6 +34,9 @@ class AppUser {
   final String id;
   final String? name;
   final String? phoneLast4;
+
+  /// The member's own number ("+961 70 111 222"), shown on the member card.
+  final String? phone;
 
   /// The Gmail address for members who joined with Google.
   final String? email;

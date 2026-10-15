@@ -10,8 +10,9 @@ import 'package:mk_ui/mk_ui.dart';
 import '../../app/providers.dart';
 import '../common/common.dart';
 
-/// Centre tab: membership card (balance, referral number, tier, transfer),
-/// Mukafaah Points, and the customer's own member QR. The QR is created once
+/// Centre tab, one screen with no scrolling: the member card (balance, phone
+/// number, tier, transfer), invite code, Mukafaah Points and the customer's
+/// own member QR. The QR is created once
 /// per member and never changes; spending points always needs the customer's
 /// approval in the app, so the code is safe to show.
 class WalletScreen extends ConsumerStatefulWidget {
@@ -35,181 +36,213 @@ class _WalletScreenState extends ConsumerState<WalletScreen> {
     final name = (home?.name ?? user?.name ?? '').toUpperCase();
     final tier = home?.tier ?? 'SILVER';
 
+    final memberCode = qr.value?.memberCode ?? '';
+    // The number they signed up with; Google members without one see their member code.
+    final cardNumber = (user?.phone?.isNotEmpty ?? false)
+        ? user!.phone!
+        : (user?.phoneLast4 != null ? '•••• ${user!.phoneLast4}' : (memberCode.isEmpty ? '•••• •••• ••••' : _groups(memberCode)));
+
+    Future<void> copy(String text) async {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (context.mounted) MkToast.show(context, s.copied, kind: MkToastKind.success);
+    }
+
     return Scaffold(
-      appBar: AppBar(title: Text(s.wallet), centerTitle: true, automaticallyImplyLeading: false),
-      body: RefreshIndicator(
-        color: MkColors.purple900,
-        onRefresh: () async {
-          refreshBalances(ref);
-          if (qr.hasError) ref.invalidate(memberQrProvider);
-          await ref.read(walletProvider.future);
-        },
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, MkSpace.xxl),
-          children: [
-            // ---------- Membership card (made to look like a real bank card) ----------
-            MkEntrance(
-              child: _MemberCard(
-                name: name.isEmpty ? s.appName : name,
-                code: qr.value?.memberCode ?? '',
-                tier: tier,
-                tierLabel: s.tier(tier),
-                points: home?.balancePoints ?? 0,
-                showBalance: _showBalance,
-                onToggleBalance: () => setState(() => _showBalance = !_showBalance),
-                onTier: () => context.push('/tier'),
-              ),
-            ),
-            const SizedBox(height: MkSpace.sm),
-            MkEntrance(
-              index: 1,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: MkPressable(
-                      onTap: () async {
-                        final code = home?.referralCode;
-                        if (code == null) return;
-                        await Clipboard.setData(ClipboardData(text: code));
-                        if (context.mounted) MkToast.show(context, s.copied, kind: MkToastKind.success);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(color: Colors.white, borderRadius: MkRadius.all(MkRadius.lg), boxShadow: MkShadow.soft),
-                        child: Row(
+      appBar: AppBar(title: Text(s.wallet), centerTitle: true, automaticallyImplyLeading: false, toolbarHeight: 48),
+      // One screen, no scrolling: the card, two small tiles and the QR share
+      // the height, and the QR takes whatever is left (it shrinks on small phones).
+      body: LayoutBuilder(
+        builder: (context, box) {
+          const side = MkSpace.lg;
+          final w = box.maxWidth - side * 2;
+          final cardW = math.min(w, box.maxHeight * 0.4 * 85.6 / 54);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(side, 2, side, MkSpace.sm),
+            child: Column(
+              children: [
+                MkEntrance(
+                  child: SizedBox(
+                    width: cardW,
+                    child: _MemberCard(
+                      name: name.isEmpty ? s.appName : name,
+                      number: cardNumber,
+                      tier: tier,
+                      tierLabel: s.tier(tier),
+                      points: home?.balancePoints ?? 0,
+                      showBalance: _showBalance,
+                      onToggleBalance: () => setState(() => _showBalance = !_showBalance),
+                      onTier: () => context.push('/tier'),
+                      transferLabel: s.transferPoints,
+                      onTransfer: () => context.push('/transfer'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                MkEntrance(
+                  index: 1,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _MiniTile(
+                          leading: const Icon(Icons.card_giftcard_rounded, size: 20, color: MkColors.purple700),
+                          label: s.referralNumber,
+                          value: home?.referralCode ?? '—',
+                          trailing: const Icon(Icons.copy_rounded, size: 15, color: MkColors.ink3),
+                          onTap: home?.referralCode == null ? null : () => copy(home!.referralCode!),
+                        ),
+                      ),
+                      const SizedBox(width: MkSpace.sm),
+                      Expanded(
+                        child: _MiniTile(
+                          leading: const MkCoin(size: 26),
+                          label: s.tr('نقاط مكافأة', 'Mukafaah Points'),
+                          value: formatPoints(wallet?.mukafaahPoints ?? 0),
+                          gold: true,
+                          onTap: () => context.push('/mukafaah'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // ---------- Member QR: fills the rest of the screen ----------
+                Expanded(
+                  child: MkEntrance(
+                    index: 2,
+                    child: LayoutBuilder(
+                      builder: (context, area) {
+                        const frame = 10.0 + 10.0; // gold ring + white inset
+                        const caption = 34.0;
+                        final q = math.max(120.0, math.min(260.0, math.min(area.maxWidth, area.maxHeight - caption) - frame * 2));
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.card_giftcard_rounded, size: 20, color: MkColors.purple700),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                borderRadius: MkRadius.all(30),
+                                gradient: const SweepGradient(
+                                  colors: [MkColors.yellow500, Color(0xFFE0A800), MkColors.purple500, MkColors.purple900, MkColors.yellow500],
+                                ),
+                                boxShadow: const [BoxShadow(color: Color(0x332C123F), blurRadius: 26, offset: Offset(0, 12))],
+                              ),
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(color: Colors.white, borderRadius: MkRadius.all(23)),
+                                child: AnimatedSwitcher(
+                                  duration: MkMotion.slow,
+                                  switchInCurve: MkMotion.emphasized,
+                                  transitionBuilder: (child, a) => FadeTransition(
+                                    opacity: a,
+                                    child: ScaleTransition(scale: Tween<double>(begin: 0.9, end: 1).animate(a), child: child),
+                                  ),
+                                  child: qr.when(
+                                    data: (v) => MkQr(key: ValueKey(v.payload), data: v.payload, size: q),
+                                    loading: () => SizedBox.square(key: const ValueKey('l'), dimension: q, child: const Center(child: CircularProgressIndicator())),
+                                    error: (e, _) => SizedBox.square(
+                                      key: const ValueKey('e'),
+                                      dimension: q,
+                                      child: Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.wifi_off_rounded, color: MkColors.ink3, size: 30),
+                                            const SizedBox(height: MkSpace.xs),
+                                            Text(errorText(s, e), textAlign: TextAlign.center, maxLines: 3, style: t.bodySmall?.copyWith(color: MkColors.ink2)),
+                                            const SizedBox(height: MkSpace.sm),
+                                            MkButton(label: s.retry, onPressed: () => ref.invalidate(memberQrProvider), expand: false),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            GestureDetector(
+                              onTap: memberCode.isEmpty ? null : () => copy(memberCode),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(s.referralNumber, style: t.labelSmall?.copyWith(color: MkColors.ink3)),
-                                  Text(home?.referralCode ?? '—', style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 1.2)),
+                                  const Icon(Icons.verified_user_rounded, size: 15, color: MkColors.success),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      s.tr('اعرضه للكاشير مع كل شراء', 'Show it at the cashier with every purchase'),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: t.bodySmall?.copyWith(color: MkColors.ink3),
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
-                            const Icon(Icons.copy_rounded, size: 16, color: MkColors.ink3),
                           ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: MkSpace.sm),
-                  _TransferButton(label: s.transferPoints, onTap: () => context.push('/transfer')),
-                ],
-              ),
-            ),
-            const SizedBox(height: MkSpace.sm),
-            // ---------- Mukafaah Points ----------
-            MkEntrance(
-              index: 1,
-              child: _MukafaahCard(points: wallet?.mukafaahPoints ?? 0, onTap: () => context.push('/mukafaah')),
-            ),
-            const SizedBox(height: MkSpace.xl),
-            // ---------- Member QR ----------
-            Text(s.tr('رمزك الخاص', 'Your member QR'), textAlign: TextAlign.center, style: t.headlineSmall),
-            const SizedBox(height: 4),
-            Text(
-              s.tr('اعرض هالرمز للكاشير مع كل شراء', 'Show this code at the cashier with every purchase'),
-              textAlign: TextAlign.center,
-              style: t.bodyMedium?.copyWith(color: MkColors.ink3),
-            ),
-            const SizedBox(height: MkSpace.lg),
-            Center(
-              child: Container(
-                padding: const EdgeInsets.all(MkSpace.md),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: MkRadius.all(28),
-                  boxShadow: const [BoxShadow(color: Color(0x262C123F), blurRadius: 30, offset: Offset(0, 14))],
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    borderRadius: MkRadius.all(20),
-                    border: Border.all(color: MkColors.purple100, width: 1.5),
-                  ),
-                  child: AnimatedSwitcher(
-                    duration: MkMotion.slow,
-                    switchInCurve: MkMotion.emphasized,
-                    transitionBuilder: (child, a) => FadeTransition(
-                      opacity: a,
-                      child: ScaleTransition(scale: Tween<double>(begin: 0.9, end: 1).animate(a), child: child),
-                    ),
-                    child: qr.when(
-                      data: (q) => MkQr(key: ValueKey(q.payload), data: q.payload, size: 232),
-                      loading: () => const SizedBox.square(
-                        key: ValueKey('l'),
-                        dimension: 232,
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                      error: (e, _) => SizedBox.square(
-                        key: const ValueKey('e'),
-                        dimension: 232,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.wifi_off_rounded, color: MkColors.ink3, size: 32),
-                              const SizedBox(height: MkSpace.xs),
-                              Text(errorText(s, e), textAlign: TextAlign.center, style: t.bodySmall?.copyWith(color: MkColors.ink2)),
-                              const SizedBox(height: MkSpace.sm),
-                              MkButton(label: s.retry, onPressed: () => ref.invalidate(memberQrProvider), expand: false),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: MkSpace.md),
-            if ((qr.value?.memberCode ?? '').isNotEmpty)
-              MkEntrance(
-                index: 2,
-                child: Column(
-                  children: [
-                    Text(s.tr('رقم العضوية', 'Member code'), style: t.labelMedium?.copyWith(color: MkColors.ink3)),
-                    const SizedBox(height: 2),
-                    GestureDetector(
-                      onTap: () async {
-                        await Clipboard.setData(ClipboardData(text: qr.value!.memberCode));
-                        if (context.mounted) MkToast.show(context, s.copied, kind: MkToastKind.success);
+                        );
                       },
-                      child: Text(
-                        _groups(qr.value!.memberCode),
-                        textDirection: TextDirection.ltr,
-                        style: t.titleLarge?.copyWith(
-                          color: MkColors.purple900,
-                          letterSpacing: 2.4,
-                          fontWeight: FontWeight.w800,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
                     ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: MkSpace.lg),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.verified_user_rounded, size: 18, color: MkColors.success),
-                const SizedBox(width: MkSpace.xs),
-                Expanded(
-                  child: Text(
-                    s.tr(
-                      'هالرمز إلك وحدك وما بيتغير. الكاشير بيمسحه ليزيدلك نقاط، وأي صرف نقاط بيحتاج موافقتك من التطبيق.',
-                      'This code is yours alone and never changes. The cashier scans it to add points, and spending points always needs your approval in the app.',
-                    ),
-                    style: t.bodySmall?.copyWith(color: MkColors.ink3, height: 1.4),
                   ),
                 ),
               ],
             ),
-          ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Small tile under the card: invite code, Mukafaah Points.
+class _MiniTile extends StatelessWidget {
+  const _MiniTile({required this.leading, required this.label, required this.value, this.trailing, this.onTap, this.gold = false});
+
+  final Widget leading;
+  final String label;
+  final String value;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool gold;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Semantics(
+      button: onTap != null,
+      label: '$label $value',
+      child: MkPressable(
+        onTap: onTap,
+        child: Container(
+          height: 54,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: gold ? null : Colors.white,
+            gradient: gold ? const LinearGradient(colors: [MkColors.yellow50, Color(0xFFFFF0A8)]) : null,
+            borderRadius: MkRadius.all(MkRadius.lg),
+            boxShadow: MkShadow.soft,
+          ),
+          child: Row(
+            children: [
+              leading,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.labelSmall?.copyWith(color: MkColors.ink3)),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 0.6, color: MkColors.purple900),
+                    ),
+                  ],
+                ),
+              ),
+              if (trailing != null) trailing!,
+            ],
+          ),
         ),
       ),
     );
@@ -226,119 +259,29 @@ String _groups(String code) {
   return b.toString();
 }
 
-class _TransferButton extends StatelessWidget {
-  const _TransferButton({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: label,
-      child: MkPressable(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 14, 8),
-          decoration: BoxDecoration(
-            color: MkColors.yellow500,
-            borderRadius: MkRadius.all(MkRadius.pill),
-            boxShadow: MkShadow.glow,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.swap_horiz_rounded, size: 18, color: MkColors.purple900),
-              const SizedBox(width: 6),
-              Text(label, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: MkColors.purple900)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Wallet row for company points, opening the Mukafaah Points page.
-class _MukafaahCard extends ConsumerWidget {
-  const _MukafaahCard({required this.points, required this.onTap});
-
-  final int points;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final s = ref.watch(stringsProvider);
-    final t = Theme.of(context).textTheme;
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    return Semantics(
-      button: true,
-      label: s.tr('نقاط مكافأة', 'Mukafaah Points'),
-      child: MkPressable(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(MkSpace.md),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: AlignmentDirectional.centerStart,
-              end: AlignmentDirectional.centerEnd,
-              colors: [MkColors.yellow50, Colors.white],
-            ),
-            borderRadius: MkRadius.all(MkRadius.lg),
-            border: Border.all(color: const Color(0xFFF6E7A1)),
-            boxShadow: MkShadow.soft,
-          ),
-          child: Row(
-            children: [
-              const MkFloat(amplitude: 3, child: MkCoin(size: 42)),
-              const SizedBox(width: MkSpace.sm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(s.tr('نقاط مكافأة', 'Mukafaah Points'), style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                    Text(
-                      s.tr('بتنصرف بمحلات أصدقاء مكافأة', 'Spend them at Mukafaah Friends shops'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: t.bodySmall?.copyWith(color: MkColors.ink3),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: MkSpace.xs),
-              AnimatedPoints(
-                value: points,
-                format: formatPoints,
-                style: t.titleLarge?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w900),
-              ),
-              Icon(rtl ? Icons.chevron_left_rounded : Icons.chevron_right_rounded, color: MkColors.ink3),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// The member card, drawn like a real bank card (85.6 x 54 mm): deep purple
 /// with a fine guilloche pattern, a gold chip, contactless mark, the member
-/// number in raised digits, and two Mukafaah coins as the brand mark.
+/// member's phone number in raised digits, a Transfer button, and two Mukafaah coins as the brand mark.
 class _MemberCard extends StatelessWidget {
   const _MemberCard({
     required this.name,
-    required this.code,
+    required this.number,
     required this.tier,
     required this.tierLabel,
     required this.points,
     required this.showBalance,
     required this.onToggleBalance,
     required this.onTier,
+    required this.transferLabel,
+    required this.onTransfer,
   });
 
   final String name;
-  final String code;
+
+  /// The member's phone number, printed like a card number.
+  final String number;
+  final String transferLabel;
+  final VoidCallback onTransfer;
   final String tier;
   final String tierLabel;
   final int points;
@@ -349,7 +292,6 @@ class _MemberCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final digits = code.isEmpty ? '•••• •••• ••••' : _groups(code);
     const raised = [Shadow(color: Color(0x99000000), offset: Offset(0, 1.2), blurRadius: 1), Shadow(color: Color(0x40FFFFFF), offset: Offset(0, -0.6))];
     return AspectRatio(
       aspectRatio: 85.6 / 54,
@@ -422,22 +364,56 @@ class _MemberCard extends StatelessWidget {
                             ],
                           ),
                           SizedBox(height: u * 3),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: AlignmentDirectional.centerStart,
-                            child: Text(
-                              digits,
-                              textDirection: TextDirection.ltr,
-                              style: TextStyle(
-                                fontFamily: 'monospace',
-                                color: const Color(0xFFF1E9F8),
-                                fontSize: u * 6.4,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: u * 0.9,
-                                shadows: raised,
-                                fontFeatures: const [FontFeature.tabularFigures()],
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: AlignmentDirectional.centerStart,
+                                  child: Text(
+                                    number,
+                                    textDirection: TextDirection.ltr,
+                                    style: TextStyle(
+                                      fontFamily: 'monospace',
+                                      color: const Color(0xFFF1E9F8),
+                                      fontSize: u * 5.6,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: u * 0.5,
+                                      shadows: raised,
+                                      fontFeatures: const [FontFeature.tabularFigures()],
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
+                              SizedBox(width: u * 2),
+                              // Transfer points, right on the card.
+                              Semantics(
+                                button: true,
+                                label: transferLabel,
+                                child: MkPressable(
+                                  onTap: onTransfer,
+                                  child: Container(
+                                    padding: EdgeInsets.symmetric(horizontal: u * 3, vertical: u * 1.6),
+                                    decoration: BoxDecoration(
+                                      color: MkColors.yellow500,
+                                      borderRadius: MkRadius.all(MkRadius.pill),
+                                      boxShadow: const [BoxShadow(color: Color(0x66FBD404), blurRadius: 12, offset: Offset(0, 3))],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.swap_horiz_rounded, size: u * 4.6, color: MkColors.purple900),
+                                        SizedBox(width: u * 1.2),
+                                        Text(
+                                          transferLabel,
+                                          style: TextStyle(color: MkColors.purple900, fontWeight: FontWeight.w800, fontSize: u * 3.4),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                           SizedBox(height: u * 2.5),
                           Row(
