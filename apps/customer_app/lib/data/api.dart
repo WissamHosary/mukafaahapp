@@ -197,7 +197,13 @@ class ShopCard {
     this.lng,
     this.logoUrl,
     this.coverUrl,
+    this.bannerUrl,
     this.distanceKm,
+    this.friends = false,
+    this.openNow,
+    this.temporarilyClosed = false,
+    this.opensAt,
+    this.todayHours,
   });
   factory ShopCard.fromJson(Json j) => ShopCard(
         id: j['id'] as String,
@@ -220,7 +226,13 @@ class ShopCard {
         lng: (j['lng'] as num?)?.toDouble(),
         logoUrl: _s(j['logoUrl']),
         coverUrl: _s(j['coverUrl']),
+        bannerUrl: _s(j['bannerUrl']),
         distanceKm: (j['distanceKm'] as num?)?.toDouble(),
+        friends: j['friends'] == true,
+        openNow: j['openNow'] as bool?,
+        temporarilyClosed: j['temporarilyClosed'] == true,
+        opensAt: _s(j['opensAt']),
+        todayHours: DayHours.fromJson(j['todayHours']),
       );
   final String id;
   final String name;
@@ -245,8 +257,22 @@ class ShopCard {
   final String? logoUrl;
   final String? coverUrl;
 
+  /// First shop banner (falls back to the cover photo), for cards.
+  final String? bannerUrl;
+
   /// How far the shop is from the member, when the app knows where they are.
   final double? distanceKm;
+
+  /// Accepts Mukafaah Points ("Mukafaah Friends").
+  final bool friends;
+
+  /// Open right now; null when the shop has no weekly hours set.
+  final bool? openNow;
+  final bool temporarilyClosed;
+
+  /// When closed: "10:00" (later today) or "TUE 10:00".
+  final String? opensAt;
+  final DayHours? todayHours;
 
   String get place => [address, city].whereType<String>().where((e) => e.isNotEmpty).join(', ');
   String get earnText => earnPercent == earnPercent.roundToDouble() ? earnPercent.toStringAsFixed(0) : earnPercent.toStringAsFixed(1);
@@ -499,14 +525,29 @@ class StoreData {
         shopName: (j['shopName'] ?? '') as String,
         canOrder: j['canOrder'] == true,
         categories: ((j['categories'] as List?) ?? const [])
-            .map((e) => (id: (e as Map)['id'] as String, name: e['name'] as String))
+            .map((e) => (id: (e as Map)['id'] as String, name: e['name'] as String, imageUrl: _s(e['imageUrl'])))
             .toList(),
         products: ((j['products'] as List?) ?? const []).map((e) => StoreProduct.fromJson(e as Json)).toList(),
       );
   final String shopName;
   final bool canOrder;
-  final List<({String id, String name})> categories;
+  final List<({String id, String name, String? imageUrl})> categories;
   final List<StoreProduct> products;
+}
+
+/// Opening hours for one day ("10:00" to "18:00"). Same times means 24 hours;
+/// closing before opening runs past midnight.
+class DayHours {
+  const DayHours(this.open, this.close);
+  static DayHours? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final o = j['open'], c = j['close'];
+    return o is String && c is String ? DayHours(o, c) : null;
+  }
+
+  final String open;
+  final String close;
+  bool get allDay => open == close;
 }
 
 class ShopDetail {
@@ -523,6 +564,7 @@ class ShopDetail {
     this.myComment,
     this.social = const ShopSocial(),
     this.hours,
+    this.openingHours,
     this.banners = const [],
     this.reviews = const [],
     this.starCounts = const [0, 0, 0, 0, 0],
@@ -533,6 +575,9 @@ class ShopDetail {
         instagram: _s(j['instagram']),
         social: ShopSocial.fromJson((j['social'] as Map?)?.cast<String, dynamic>() ?? {'instagram': j['instagram']}),
         hours: _s(j['hours']),
+        openingHours: j['openingHours'] is List && (j['openingHours'] as List).length == 7
+            ? (j['openingHours'] as List).map(DayHours.fromJson).toList()
+            : null,
         banners: ((j['banners'] as List?) ?? const [])
             .map((e) => (url: (e as Map)['url'] as String?, caption: _s(e['caption'])))
             .where((b) => b.url != null)
@@ -563,7 +608,11 @@ class ShopDetail {
   final String? myComment;
   final bool canRate;
   final ShopSocial social;
+  /// A free note about the hours, set in Manager.
   final String? hours;
+
+  /// 7 days, Monday first; null for a closed day. Null when not set.
+  final List<DayHours?>? openingHours;
   final List<ShopBanner> banners;
   final List<ShopReview> reviews;
 
@@ -1147,26 +1196,34 @@ class AppNotification {
 
 /// Filters for the Shops tab.
 class ShopQuery {
-  const ShopQuery({this.q = '', this.category, this.type, this.sort = 'popular'});
+  const ShopQuery({this.q = '', this.category, this.type, this.sort = 'popular', this.lat, this.lng});
   final String q;
   final String? category;
   final String? type;
+
+  /// popular, rating, points, newest, name, name_desc, nearest, friends.
   final String sort;
 
-  ShopQuery copy({String? q, String? category, bool clearCategory = false, String? type, bool clearType = false, String? sort}) =>
+  /// The member's location, for "nearest".
+  final double? lat;
+  final double? lng;
+
+  ShopQuery copy({String? q, String? category, bool clearCategory = false, String? type, bool clearType = false, String? sort, double? lat, double? lng}) =>
       ShopQuery(
         q: q ?? this.q,
         category: clearCategory ? null : (category ?? this.category),
         type: clearType ? null : (type ?? this.type),
         sort: sort ?? this.sort,
+        lat: lat ?? this.lat,
+        lng: lng ?? this.lng,
       );
 
   @override
   bool operator ==(Object other) =>
-      other is ShopQuery && other.q == q && other.category == category && other.type == type && other.sort == sort;
+      other is ShopQuery && other.q == q && other.category == category && other.type == type && other.sort == sort && other.lat == lat && other.lng == lng;
 
   @override
-  int get hashCode => Object.hash(q, category, type, sort);
+  int get hashCode => Object.hash(q, category, type, sort, lat, lng);
 }
 
 /// All customer API calls. The server is the source of truth for every number.
@@ -1371,6 +1428,7 @@ class CustomerApi {
         if (q.category != null) 'category': q.category,
         if (q.type != null) 'type': q.type,
         'sort': q.sort,
+        if (q.sort == 'nearest' && q.lat != null && q.lng != null) ...{'lat': '${q.lat}', 'lng': '${q.lng}'},
       },
     );
     return (

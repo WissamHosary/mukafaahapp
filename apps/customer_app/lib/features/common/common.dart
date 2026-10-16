@@ -64,7 +64,11 @@ class ShopCardTile extends ConsumerWidget {
     return MkShopCard(
       width: width,
       name: shop.name,
-      coverUrl: url(shop.coverUrl),
+      coverUrl: url(shop.bannerUrl ?? shop.coverUrl),
+      friends: shop.friends,
+      friendsLabel: s.tr('من أصدقاء مكافأة', 'Mukafaah Friend'),
+      openNow: shop.openNow,
+      openLabel: shop.openNow == null ? null : (shop.openNow! ? s.tr('مفتوح', 'Open') : s.tr('مسكّر', 'Closed')),
       logoUrl: url(shop.logoUrl),
       rating: shop.rating,
       programType: shop.programType,

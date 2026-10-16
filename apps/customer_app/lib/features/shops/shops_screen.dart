@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mk_core/mk_core.dart';
 import 'package:mk_ui/mk_ui.dart';
@@ -45,11 +47,13 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
   Future<void> _sortSheet() async {
     final s = ref.read(stringsProvider);
     final options = [
-      ('popular', s.tr('الأكثر زيارة', 'Most popular')),
-      ('rating', s.tr('الأعلى تقييم', 'Top rated')),
-      ('points', s.tr('وين عندي نقاط', 'Where I have points')),
-      ('newest', s.tr('الأحدث', 'Newest')),
-      ('name', s.tr('بالاسم', 'Name')),
+      ('popular', s.tr('الأكثر زيارة', 'Most popular'), Icons.local_fire_department_rounded),
+      ('name', s.tr('من أ إلى ي', 'A to Z'), Icons.sort_by_alpha_rounded),
+      ('name_desc', s.tr('من ي إلى أ', 'Z to A'), Icons.sort_by_alpha_rounded),
+      ('nearest', s.tr('الأقرب لإلي', 'Nearest'), Icons.near_me_rounded),
+      ('points', s.tr('وين عندي نقاط أكتر', 'Most points'), Icons.toll_rounded),
+      ('rating', s.tr('الأعلى تقييم', 'Top rated'), Icons.star_rounded),
+      ('friends', s.tr('أصدقاء مكافأة أولاً', 'Mukafaah Friends first'), Icons.verified_rounded),
     ];
     final picked = await showMkSheet<String>(
       context,
@@ -57,18 +61,38 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(s.tr('ترتيب', 'Sort'), style: Theme.of(ctx).textTheme.titleLarge),
+          Text(s.tr('ترتيب المحلات', 'Sort shops'), style: Theme.of(ctx).textTheme.titleLarge),
           const SizedBox(height: MkSpace.sm),
           for (final o in options)
             ListTile(
-              title: Text(o.$2),
-              trailing: _q.sort == o.$1 ? const Icon(Icons.check_rounded, color: MkColors.purple700) : null,
+              contentPadding: EdgeInsets.zero,
+              leading: o.$1 == 'friends'
+                  ? const MkFriendsBadge(size: 26)
+                  : Icon(o.$3, color: _q.sort == o.$1 ? MkColors.purple700 : MkColors.ink3),
+              title: Text(o.$2, style: TextStyle(fontWeight: _q.sort == o.$1 ? FontWeight.w800 : FontWeight.w500)),
+              trailing: _q.sort == o.$1 ? const Icon(Icons.check_circle_rounded, color: MkColors.purple700) : null,
               onTap: () => Navigator.of(ctx).pop(o.$1),
             ),
         ],
       ),
     );
-    if (picked != null) setState(() => _q = _q.copy(sort: picked));
+    if (picked == null) return;
+    if (picked == 'nearest') {
+      // Nearest needs the location: ask once, here, when the member chose it.
+      try {
+        var p = await Geolocator.checkPermission();
+        if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
+      } on Object {
+        // No location: the list falls back to popular.
+      }
+      ref.invalidate(myLocationProvider);
+      final at = await ref.read(myLocationProvider.future);
+      if (!mounted) return;
+      if (at == null) MkToast.show(context, s.tr('ما قدرنا نعرف موقعك', "We couldn't get your location"));
+      setState(() => _q = _q.copy(sort: picked, lat: at?.lat, lng: at?.lng));
+      return;
+    }
+    setState(() => _q = _q.copy(sort: picked));
   }
 
   @override
@@ -82,6 +106,18 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
     final catList = cats ??
         [for (final k in S.categoryKeys) CategoryInfo(key: k, nameEn: s.category(k), nameAr: s.category(k))];
     final mediaUrl = ref.watch(mediaUrlProvider);
+    final tabs = [
+      (null, s.tr('الكل', 'All'), MkColors.purple700),
+      ('IN_STORE', s.inStore, MkColors.inStore),
+      ('SHARED', s.shared, MkColors.shared),
+      ('NETWORK', s.tr('شبكة', 'Network'), MkColors.network),
+    ];
+    final info = switch (_q.type) {
+      'IN_STORE' => s.tr('بتجمع وبتصرف نقاطك بنفس المحل.', 'Collect and spend your points at the same shop.'),
+      'SHARED' => s.tr('نفس النقاط بكل محلات المجموعة: اشتري من محل واصرفها كلها بتاني.', 'Same points at every shop in the group: buy at one, spend them all at another.'),
+      'NETWORK' => s.tr('نقاط وحدة بكل المجموعة، وكل محل بيحدد قديش بيقبل منها.', 'One balance across the group; each shop sets how much of it you can use.'),
+      _ => null,
+    };
 
     return Scaffold(
       appBar: AppBar(
@@ -90,13 +126,13 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
         automaticallyImplyLeading: widget.standalone,
         actions: [
           IconButton(
-            tooltip: s.map,
+            tooltip: s.tr('كيف بتشتغل النقاط', 'How points work'),
             onPressed: () => showMkSheet<void>(
               context,
               builder: (ctx) => Text(
                 s.tr(
-                  'كيف بتشتغل النقاط:\n\n• داخل المحل: بتجمع وبتصرف بنفس المحل.\n\n• مشترك: نفس النقاط بكل محلات المجموعة. بتشتري من محل وبتصرفها كلها بمحل تاني.\n\n• شبكة: نقاط وحدة بكل المجموعة، بس كل محل بيحدد قديش بيقبل منها بكل زيارة (مثلاً نصّ نقاطك).',
-                  'How points work:\n\n• In-Store: collect and spend at the same shop.\n\n• Shared: the same points at every shop in the group. Buy at one shop, spend all of them at another.\n\n• Network: one balance across the group, but each shop decides how much of it you can use per visit (for example half your points).',
+                  'كيف بتشتغل النقاط:\n\n• داخل المحل: بتجمع وبتصرف بنفس المحل.\n\n• مشترك: نفس النقاط بكل محلات المجموعة. بتشتري من محل وبتصرفها كلها بمحل تاني.\n\n• شبكة: نقاط وحدة بكل المجموعة، بس كل محل بيحدد قديش بيقبل منها بكل زيارة (مثلاً نصّ نقاطك).\n\n• علامة مكافأة جنب اسم المحل: المحل من أصدقاء مكافأة وبيقبل نقاط مكافأة.',
+                  'How points work:\n\n• In-Store: collect and spend at the same shop.\n\n• Shared: the same points at every shop in the group. Buy at one shop, spend all of them at another.\n\n• Network: one balance across the group, but each shop decides how much of it you can use per visit (for example half your points).\n\n• The Mukafaah mark next to a name: the shop is a Mukafaah Friend and accepts Mukafaah Points.',
                 ),
                 style: Theme.of(ctx).textTheme.bodyLarge,
               ),
@@ -112,13 +148,43 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
         },
         child: CustomScrollView(
           slivers: [
-            // Categories first.
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, 0),
+              sliver: SliverToBoxAdapter(
+                child: Row(
+                  children: [
+                    Expanded(child: MkSearchField(hint: s.search, controller: _search, onChanged: _onSearch)),
+                    const SizedBox(width: MkSpace.xs),
+                    _SortButton(label: s.tr('ترتيب', 'Sort'), active: _q.sort != 'popular', onTap: _sortSheet),
+                  ],
+                ),
+              ),
+            ),
+            // All / In-Store / Shared / Network.
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(MkSpace.md, MkSpace.sm, MkSpace.md, 0),
+                child: _TypeTabs(
+                  tabs: tabs,
+                  selected: _q.type,
+                  onSelected: (v) => setState(() => _q = v == null ? _q.copy(clearType: true) : _q.copy(type: v)),
+                ),
+              ),
+            ),
+            if (info != null)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, 0),
+                  child: Text(info, style: t.bodySmall?.copyWith(color: MkColors.ink2)),
+                ),
+              ),
+            // Categories.
             if (widget.category == null)
               SliverToBoxAdapter(
                 child: SizedBox(
-                  height: 108,
+                  height: 112,
                   child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, 0),
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
                     scrollDirection: Axis.horizontal,
                     itemCount: catList.length,
                     separatorBuilder: (context, i) => const SizedBox(width: MkSpace.xs),
@@ -139,36 +205,20 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
                   ),
                 ),
               ),
-            // How points work at these shops: In-Store, Shared, Network.
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
-              sliver: SliverToBoxAdapter(
-                child: _ProgramPicker(
-                  selected: _q.type,
-                  onSelected: (v) => setState(() => _q = v == null ? _q.copy(clearType: true) : _q.copy(type: v)),
-                ),
-              ),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
+              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, MkSpace.sm),
               sliver: SliverToBoxAdapter(
                 child: Row(
                   children: [
-                    Expanded(child: MkSearchField(hint: s.search, controller: _search, onChanged: _onSearch)),
-                    const SizedBox(width: MkSpace.xs),
-                    OutlinedButton.icon(
-                      onPressed: _sortSheet,
-                      icon: const Icon(Icons.sort_rounded, size: 18),
-                      label: Text(s.tr('ترتيب', 'Sort')),
-                    ),
+                    Text(s.shopsAvailable(data.value?.total ?? 0), style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    const Spacer(),
+                    if (_q.category != null || _q.type != null || _q.sort != 'popular')
+                      TextButton(
+                        onPressed: () => setState(() => _q = ShopQuery(category: widget.category, q: _q.q)),
+                        child: Text(s.tr('مسح', 'Clear')),
+                      ),
                   ],
                 ),
-              ),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.md, MkSpace.lg, MkSpace.sm),
-              sliver: SliverToBoxAdapter(
-                child: Text(s.shopsAvailable(data.value?.total ?? 0), style: t.titleMedium),
               ),
             ),
             ...data.when(
@@ -176,9 +226,9 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
                   ? [
                       SliverToBoxAdapter(
                         child: MkEmptyState(
-                          icon: Icons.search_off_rounded,
-                          title: s.tr('ما في محلات هون', 'No shops here yet'),
-                          message: s.tr('جرّب فلتر تاني.', 'Try another filter.'),
+                          icon: Icons.storefront_rounded,
+                          title: s.tr('قريباً', 'Coming soon'),
+                          message: s.tr('ما في محلات هون بعد. جرّب فلتر تاني.', 'No shops here yet. Try another filter.'),
                         ),
                       ),
                     ]
@@ -188,7 +238,7 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
                         sliver: SliverGrid(
                           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                             maxCrossAxisExtent: 220,
-                            mainAxisExtent: 244,
+                            mainAxisExtent: 262,
                             crossAxisSpacing: MkSpace.sm,
                             mainAxisSpacing: MkSpace.sm,
                           ),
@@ -200,8 +250,17 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
                       ),
                     ],
               loading: () => [
-                const SliverToBoxAdapter(
-                  child: Padding(padding: EdgeInsets.all(MkSpace.xxl), child: Center(child: CircularProgressIndicator())),
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: MkSpace.lg),
+                  sliver: SliverGrid(
+                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 220,
+                      mainAxisExtent: 262,
+                      crossAxisSpacing: MkSpace.sm,
+                      mainAxisSpacing: MkSpace.sm,
+                    ),
+                    delegate: SliverChildBuilderDelegate((context, i) => DecoratedBox(decoration: BoxDecoration(color: MkColors.purple50, borderRadius: MkRadius.all(MkRadius.lg))), childCount: 4),
+                  ),
                 ),
               ],
               error: (e, _) => [
@@ -217,85 +276,96 @@ class _ShopsScreenState extends ConsumerState<ShopsScreen> {
   }
 }
 
+class _SortButton extends StatelessWidget {
+  const _SortButton({required this.label, required this.active, required this.onTap});
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
 
-/// In-Store / Shared / Network as three big choices, with what each one means.
-class _ProgramPicker extends ConsumerWidget {
-  const _ProgramPicker({required this.selected, required this.onSelected});
+  @override
+  Widget build(BuildContext context) {
+    return MkPressable(
+      onTap: onTap,
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: active ? MkColors.purple900 : Colors.white,
+          borderRadius: MkRadius.all(MkRadius.md),
+          border: Border.all(color: active ? MkColors.purple900 : MkColors.line),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.tune_rounded, size: 18, color: active ? MkColors.yellow500 : MkColors.ink),
+            const SizedBox(width: 6),
+            Text(label, style: Theme.of(context).textTheme.labelLarge?.copyWith(color: active ? Colors.white : MkColors.ink)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// All / In-Store / Shared / Network with a sliding underline.
+class _TypeTabs extends StatelessWidget {
+  const _TypeTabs({required this.tabs, required this.selected, required this.onSelected});
+  final List<(String?, String, Color)> tabs;
   final String? selected;
   final ValueChanged<String?> onSelected;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final s = ref.watch(stringsProvider);
+  Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    final items = [
-      ('IN_STORE', s.inStore, Icons.storefront_rounded, MkColors.inStore, s.tr('بتجمع وبتصرف بنفس المحل', 'Collect and spend at the same shop')),
-      ('SHARED', s.shared, Icons.hub_rounded, MkColors.shared, s.tr('نفس النقاط بكل المحلات: اشتري من محل واصرف بتاني', 'Same points at every shop: buy at one, spend at another')),
-      ('NETWORK', s.tr('شبكة', 'Network'), Icons.share_rounded, MkColors.network, s.tr('نقاط وحدة، وكل محل بيحدد قديش بيقبل', 'One balance; each shop sets how much it takes')),
-    ];
-    final sel = items.where((x) => x.$1 == selected).firstOrNull;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            for (final (i, x) in items.indexed) ...[
-              if (i > 0) const SizedBox(width: MkSpace.xs),
-              Expanded(
-                child: Semantics(
-                  selected: selected == x.$1,
-                  button: true,
-                  child: MkPressable(
-                    onTap: () => onSelected(selected == x.$1 ? null : x.$1),
-                    child: AnimatedContainer(
-                      duration: MkMotion.base,
-                      curve: MkMotion.standard,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-                      decoration: BoxDecoration(
-                        color: selected == x.$1 ? x.$4 : Colors.white,
-                        borderRadius: MkRadius.all(MkRadius.lg),
-                        border: Border.all(color: selected == x.$1 ? x.$4 : MkColors.line),
-                        boxShadow: selected == x.$1 ? [BoxShadow(color: x.$4.withValues(alpha: 0.35), blurRadius: 16, offset: const Offset(0, 6))] : null,
-                      ),
-                      child: Column(
-                        children: [
-                          Icon(x.$3, color: selected == x.$1 ? MkColors.yellow500 : x.$4, size: 24),
-                          const SizedBox(height: 4),
-                          Text(
-                            x.$2,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: t.labelLarge?.copyWith(fontWeight: FontWeight.w800, color: selected == x.$1 ? Colors.white : MkColors.ink),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+    final idx = math.max(0, tabs.indexWhere((x) => x.$1 == selected));
+    return LayoutBuilder(
+      builder: (context, box) {
+        final w = box.maxWidth / tabs.length;
+        final rtl = Directionality.of(context) == TextDirection.rtl;
+        return SizedBox(
+          height: 44,
+          child: Stack(
+            children: [
+              Positioned(left: 0, right: 0, bottom: 0, child: Container(height: 1, color: MkColors.line)),
+              AnimatedPositioned(
+                duration: MkMotion.base,
+                curve: MkMotion.emphasized,
+                bottom: 0,
+                left: (rtl ? tabs.length - 1 - idx : idx) * w + w * 0.2,
+                width: w * 0.6,
+                height: 3,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: tabs[idx].$3, borderRadius: MkRadius.all(2)),
                 ),
               ),
-            ],
-          ],
-        ),
-        AnimatedSize(
-          duration: MkMotion.base,
-          child: sel == null
-              ? const SizedBox(width: double.infinity)
-              : Padding(
-                  padding: const EdgeInsets.only(top: MkSpace.xs),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(color: sel.$4.withValues(alpha: 0.08), borderRadius: MkRadius.all(MkRadius.md)),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info_outline_rounded, size: 16, color: sel.$4),
-                        const SizedBox(width: 6),
-                        Expanded(child: Text(sel.$5, style: t.bodySmall?.copyWith(color: MkColors.ink2, fontWeight: FontWeight.w600))),
-                      ],
+              Row(
+                children: [
+                  for (final x in tabs)
+                    Expanded(
+                      child: Semantics(
+                        selected: x.$1 == selected,
+                        button: true,
+                        child: InkWell(
+                          onTap: () => onSelected(x.$1),
+                          child: Center(
+                            child: AnimatedDefaultTextStyle(
+                              duration: MkMotion.base,
+                              style: (t.labelLarge ?? const TextStyle()).copyWith(
+                                color: x.$1 == selected ? x.$3 : MkColors.ink3,
+                                fontWeight: x.$1 == selected ? FontWeight.w800 : FontWeight.w600,
+                              ),
+                              child: Text(x.$2, maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-        ),
-      ],
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

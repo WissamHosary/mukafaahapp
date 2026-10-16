@@ -653,8 +653,8 @@ class _Block extends ConsumerWidget {
               padding: const EdgeInsets.only(top: MkSpace.sm),
               child: MkHorizontalSection(
                 title: title(fallback),
-                height: 250,
-                itemWidth: 200,
+                height: 270,
+                itemWidth: 196,
                 itemCount: b.shops.length,
                 action: s.seeAll,
                 onAction: onAll,

@@ -132,8 +132,20 @@ class _StoreCatalogState extends ConsumerState<StoreCatalog> {
     final data = ref.watch(shopStoreProvider(widget.shopId));
 
     return data.when(
-      loading: () => const SliverToBoxAdapter(
-        child: Padding(padding: EdgeInsets.all(MkSpace.xxl), child: Center(child: CircularProgressIndicator())),
+      loading: () => SliverPadding(
+        padding: const EdgeInsets.all(MkSpace.lg),
+        sliver: SliverGrid(
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 220,
+            mainAxisExtent: 268,
+            crossAxisSpacing: MkSpace.sm,
+            mainAxisSpacing: MkSpace.sm,
+          ),
+          delegate: SliverChildBuilderDelegate(
+            (context, i) => DecoratedBox(decoration: BoxDecoration(color: MkColors.purple50, borderRadius: MkRadius.all(MkRadius.lg))),
+            childCount: 4,
+          ),
+        ),
       ),
       error: (e, _) => SliverToBoxAdapter(
         child: MkErrorState(
@@ -148,42 +160,39 @@ class _StoreCatalogState extends ConsumerState<StoreCatalog> {
             .toList();
         if (_sort == 'low') list.sort((a, b) => a.priceMinor.compareTo(b.priceMinor));
         if (_sort == 'high') list.sort((a, b) => b.priceMinor.compareTo(a.priceMinor));
+        final catName = _cat == null ? s.tr('كل المنتجات', 'All products') : d.categories.firstWhere((c) => c.id == _cat, orElse: () => (id: '', name: '', imageUrl: null)).name;
         return SliverMainAxisGroup(
           slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, 0),
-              sliver: SliverToBoxAdapter(
-                child: Row(
-                  children: [
-                    Expanded(child: MkSearchField(hint: s.tr('دوّر عن منتج', 'Search products'), onChanged: (v) => setState(() => _q = v.trim()))),
-                    const SizedBox(width: MkSpace.xs),
-                    PopupMenuButton<String>(
-                      tooltip: s.tr('ترتيب', 'Sort'),
-                      icon: const Icon(Icons.tune_rounded),
-                      initialValue: _sort,
-                      onSelected: (v) => setState(() => _sort = v),
-                      itemBuilder: (ctx) => [
-                        PopupMenuItem(value: 'featured', child: Text(s.tr('المميز أولاً', 'Featured'))),
-                        PopupMenuItem(value: 'low', child: Text(s.tr('السعر: من الأقل', 'Price: low to high'))),
-                        PopupMenuItem(value: 'high', child: Text(s.tr('السعر: من الأعلى', 'Price: high to low'))),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
             if (d.categories.isNotEmpty)
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: MkSpace.sm),
-                  child: MkChoiceChips<String?>(
-                    padding: const EdgeInsets.symmetric(horizontal: MkSpace.lg),
-                    items: [(null, s.all), for (final c in d.categories) (c.id, c.name)],
-                    selected: _cat,
-                    onSelected: (v) => setState(() => _cat = v),
+                child: SizedBox(
+                  height: 108,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: d.categories.length + 1,
+                    separatorBuilder: (context, i) => const SizedBox(width: 10),
+                    itemBuilder: (context, i) {
+                      if (i == 0) {
+                        return _CatTile(label: s.all, selected: _cat == null, icon: Icons.grid_view_rounded, onTap: () => setState(() => _cat = null));
+                      }
+                      final c = d.categories[i - 1];
+                      return _CatTile(
+                        label: c.name,
+                        imageUrl: url(c.imageUrl),
+                        selected: _cat == c.id,
+                        onTap: () => setState(() => _cat = _cat == c.id ? null : c.id),
+                      );
+                    },
                   ),
                 ),
               ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
+              sliver: SliverToBoxAdapter(
+                child: MkSearchField(hint: s.tr('دوّر عن منتج', 'Search products'), onChanged: (v) => setState(() => _q = v.trim())),
+              ),
+            ),
             if (!d.canOrder)
               SliverToBoxAdapter(
                 child: Padding(
@@ -198,9 +207,48 @@ class _StoreCatalogState extends ConsumerState<StoreCatalog> {
                 ),
               ),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.md, MkSpace.lg, MkSpace.xs),
+              padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.md, MkSpace.md, MkSpace.xs),
               sliver: SliverToBoxAdapter(
-                child: Text(s.tr('${list.length} منتج', '${list.length} products'), style: t.labelLarge?.copyWith(color: MkColors.ink3)),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(text: catName, style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                            TextSpan(text: '  ${list.length}', style: t.labelLarge?.copyWith(color: MkColors.ink3)),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: s.tr('ترتيب', 'Sort'),
+                      initialValue: _sort,
+                      onSelected: (v) => setState(() => _sort = v),
+                      itemBuilder: (ctx) => [
+                        PopupMenuItem(value: 'featured', child: Text(s.tr('المميز أولاً', 'Featured'))),
+                        PopupMenuItem(value: 'low', child: Text(s.tr('السعر: من الأقل', 'Price: low to high'))),
+                        PopupMenuItem(value: 'high', child: Text(s.tr('السعر: من الأعلى', 'Price: high to low'))),
+                      ],
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.swap_vert_rounded, size: 18, color: MkColors.purple700),
+                            const SizedBox(width: 4),
+                            Text(
+                              switch (_sort) { 'low' => s.tr('الأرخص', 'Lowest price'), 'high' => s.tr('الأغلى', 'Highest price'), _ => s.tr('المميز', 'Featured') },
+                              style: t.labelLarge?.copyWith(color: MkColors.purple700),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             if (list.isEmpty)
@@ -213,54 +261,276 @@ class _StoreCatalogState extends ConsumerState<StoreCatalog> {
               )
             else
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(MkSpace.lg, 0, MkSpace.lg, MkSpace.xxl),
+                padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, MkSpace.xxl),
                 sliver: SliverGrid(
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: 220,
-                    childAspectRatio: 0.66,
+                    mainAxisExtent: 268,
                     crossAxisSpacing: MkSpace.sm,
-                    mainAxisSpacing: MkSpace.sm,
+                    mainAxisSpacing: MkSpace.md,
                   ),
                   delegate: SliverChildBuilderDelegate(
                     childCount: list.length,
-                    (context, i) {
-                      final p = list[i];
-                      return MkStagger(
-                        index: i % 8,
-                        child: MkProductCard(
-                          name: p.name,
-                          imageUrl: url(p.imageUrl),
-                          price: _priceText(s, p),
-                          oldPrice: p.compareAtMinor != null && p.compareAtMinor! > p.priceMinor ? money(p.compareAtMinor!) : null,
-                          saleLabel: _saleText(p.priceMinor, p.compareAtMinor),
-                          soldOutLabel: p.inStock ? null : s.tr('خلصت الكمية', 'Sold out'),
-                          subtitle: p.hasVariants ? s.tr('خيارات متعددة', 'More options') : null,
-                          onTap: () => context.push('/shop/${widget.shopId}/product/${p.id}'),
-                          onAdd: p.hasVariants || !d.canOrder
-                              ? null
-                              : () => _addToCart(
-                                    context,
-                                    ref,
-                                    widget.shopId,
-                                    d.shopName,
-                                    CartLine(
-                                      productId: p.id,
-                                      name: p.name,
-                                      priceMinor: p.priceMinor,
-                                      qty: 1,
-                                      imageUrl: p.imageUrl,
-                                      maxQty: p.trackStock ? p.stock : null,
-                                    ),
-                                  ),
-                        ),
-                      );
-                    },
+                    (context, i) => MkStagger(
+                      index: i % 8,
+                      child: _ProductTile(shopId: widget.shopId, shopName: d.shopName, canOrder: d.canOrder, p: list[i]),
+                    ),
                   ),
                 ),
               ),
           ],
         );
       },
+    );
+  }
+}
+
+/// Category tile: the category's picture (from Manager) in a rounded square.
+class _CatTile extends StatelessWidget {
+  const _CatTile({required this.label, required this.selected, required this.onTap, this.imageUrl, this.icon});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final String? imageUrl;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: MkPressable(
+        onTap: onTap,
+        child: SizedBox(
+          width: 72,
+          child: Column(
+            children: [
+              AnimatedContainer(
+                duration: MkMotion.base,
+                width: 66,
+                height: 66,
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  borderRadius: MkRadius.all(20),
+                  border: Border.all(color: selected ? MkColors.purple700 : Colors.transparent, width: 2),
+                ),
+                child: ClipRRect(
+                  borderRadius: MkRadius.all(16),
+                  child: imageUrl != null
+                      ? MkNetImage(url: imageUrl, fallbackIcon: Icons.category_rounded, cacheWidth: 200)
+                      : ColoredBox(
+                          color: selected ? MkColors.purple900 : MkColors.purple50,
+                          child: Icon(icon ?? Icons.category_rounded, color: selected ? MkColors.yellow500 : MkColors.purple700),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: t.labelMedium?.copyWith(fontWeight: selected ? FontWeight.w800 : FontWeight.w600, color: selected ? MkColors.purple900 : MkColors.ink2),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A product in the grid: photo, name, price, and add right from the grid
+/// (a quantity stepper once it's in the cart). Products with options open
+/// their page to choose.
+class _ProductTile extends ConsumerWidget {
+  const _ProductTile({required this.shopId, required this.shopName, required this.canOrder, required this.p});
+  final String shopId;
+  final String shopName;
+  final bool canOrder;
+  final StoreProduct p;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    final url = ref.watch(mediaUrlProvider);
+    final cart = ref.watch(cartProvider);
+    final inCart = cart.shopId == shopId ? cart.lines.where((l) => l.key == p.id).firstOrNull : null;
+    final sale = _saleText(p.priceMinor, p.compareAtMinor);
+    void open() => context.push('/shop/$shopId/product/${p.id}');
+
+    final Widget action;
+    if (!p.inStock || !canOrder) {
+      action = const SizedBox.shrink();
+    } else if (p.hasVariants) {
+      action = _RoundAdd(icon: Icons.tune_rounded, tooltip: s.tr('اختار', 'Choose options'), onTap: open, light: true);
+    } else if (inCart != null) {
+      action = Container(
+        height: 34,
+        decoration: BoxDecoration(color: MkColors.purple900, borderRadius: MkRadius.all(MkRadius.pill)),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _StepBtn(icon: inCart.qty == 1 ? Icons.delete_outline_rounded : Icons.remove_rounded, onTap: () => ref.read(cartProvider.notifier).setQty(inCart.key, inCart.qty - 1)),
+            Text('${inCart.qty}', style: t.labelLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
+            _StepBtn(
+              icon: Icons.add_rounded,
+              onTap: inCart.maxQty != null && inCart.qty >= inCart.maxQty! ? null : () => ref.read(cartProvider.notifier).setQty(inCart.key, inCart.qty + 1),
+            ),
+          ],
+        ),
+      );
+    } else {
+      action = _RoundAdd(
+        icon: Icons.add_rounded,
+        tooltip: s.tr('أضف عالسلة', 'Add to cart'),
+        onTap: () => _addToCart(
+          context,
+          ref,
+          shopId,
+          shopName,
+          CartLine(productId: p.id, name: p.name, priceMinor: p.priceMinor, qty: 1, imageUrl: p.imageUrl, maxQty: p.trackStock ? p.stock : null),
+        ),
+      );
+    }
+
+    return Semantics(
+      button: true,
+      label: p.name,
+      child: GestureDetector(
+        onTap: open,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AspectRatio(
+              aspectRatio: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF4F1F7),
+                  borderRadius: MkRadius.all(MkRadius.lg),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Hero(tag: 'p-${p.id}', child: MkNetImage(url: url(p.imageUrl), fallbackIcon: Icons.shopping_bag_outlined, cacheWidth: 520)),
+                    if (!p.inStock)
+                      ColoredBox(
+                        color: Colors.white.withValues(alpha: 0.55),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(color: MkColors.ink, borderRadius: MkRadius.all(MkRadius.pill)),
+                            child: Text(s.tr('خلصت الكمية', 'Sold out'), style: t.labelSmall?.copyWith(color: Colors.white)),
+                          ),
+                        ),
+                      ),
+                    if (sale != null && p.inStock)
+                      PositionedDirectional(
+                        top: 8,
+                        start: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(color: MkColors.danger, borderRadius: MkRadius.all(MkRadius.pill)),
+                          child: Text(sale, style: t.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
+                        ),
+                      ),
+                    if (p.featured)
+                      PositionedDirectional(
+                        top: 8,
+                        end: 8,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(color: MkColors.yellow500, shape: BoxShape.circle),
+                          child: const Icon(Icons.star_rounded, size: 13, color: MkColors.purple900),
+                        ),
+                      ),
+                    PositionedDirectional(bottom: 8, end: 8, child: action),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(p.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w700, height: 1.25)),
+            const Spacer(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Flexible(
+                  child: Text(
+                    _priceText(s, p),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: t.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: MkColors.purple900),
+                  ),
+                ),
+                if (p.compareAtMinor != null && p.compareAtMinor! > p.priceMinor) ...[
+                  const SizedBox(width: 6),
+                  Text(
+                    money(p.compareAtMinor!),
+                    style: t.labelSmall?.copyWith(color: MkColors.ink3, decoration: TextDecoration.lineThrough),
+                  ),
+                ],
+              ],
+            ),
+            if (p.hasVariants)
+              Text(
+                p.options.map((o) => '${o.values.length} ${o.name.toLowerCase()}').join(' · '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: t.labelSmall?.copyWith(color: MkColors.ink3, fontWeight: FontWeight.w500),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RoundAdd extends StatelessWidget {
+  const _RoundAdd({required this.icon, required this.tooltip, required this.onTap, this.light = false});
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool light;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: MkPressable(
+        onTap: onTap,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: light ? Colors.white : MkColors.purple900,
+            shape: BoxShape.circle,
+            boxShadow: const [BoxShadow(color: Color(0x332C123F), blurRadius: 10, offset: Offset(0, 4))],
+          ),
+          child: Icon(icon, size: 20, color: light ? MkColors.purple900 : MkColors.yellow500),
+        ),
+      ),
+    );
+  }
+}
+
+class _StepBtn extends StatelessWidget {
+  const _StepBtn({required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkResponse(
+      onTap: onTap,
+      radius: 18,
+      child: SizedBox(width: 32, height: 34, child: Icon(icon, size: 17, color: onTap == null ? Colors.white38 : MkColors.yellow500)),
     );
   }
 }
@@ -400,7 +670,9 @@ class _ProductScreenState extends ConsumerState<ProductScreen> {
                           controller: _pages,
                           itemCount: images.length,
                           onPageChanged: (i) => setState(() => _page = i),
-                          itemBuilder: (context, i) => MkNetImage(url: url(images[i]), cacheWidth: 1080),
+                          itemBuilder: (context, i) => i == 0
+                              ? Hero(tag: 'p-${p.id}', child: MkNetImage(url: url(images[i]), cacheWidth: 1080))
+                              : MkNetImage(url: url(images[i]), cacheWidth: 1080),
                         ),
                       if (images.length > 1)
                         Positioned(

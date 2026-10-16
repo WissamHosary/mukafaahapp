@@ -126,9 +126,9 @@ class MkStars extends StatelessWidget {
   }
 }
 
-/// Shop card used in home sections, the shops grid and the map sheet:
-/// cover photo with logo, offers tag and a gold "% back" badge, then name,
-/// rating, place, program and the customer's points there.
+/// A shop in a list or grid: the shop's banner with its round logo on top,
+/// the name (with the Mukafaah Friends mark when it accepts Mukafaah Points),
+/// stars, how points work there, points back and where it is.
 class MkShopCard extends StatelessWidget {
   const MkShopCard({
     required this.name,
@@ -145,10 +145,16 @@ class MkShopCard extends StatelessWidget {
     this.ratingCount,
     this.width,
     this.badge,
+    this.friends = false,
+    this.friendsLabel = 'Mukafaah Friend',
+    this.openNow,
+    this.openLabel,
     super.key,
   });
 
   final String name;
+
+  /// The shop's first banner (or cover photo).
   final String? coverUrl;
   final String? logoUrl;
   final double rating;
@@ -167,15 +173,25 @@ class MkShopCard extends StatelessWidget {
   final double? width;
   final String? badge;
 
+  /// Accepts Mukafaah Points: shows the Mukafaah mark next to the name.
+  final bool friends;
+  final String friendsLabel;
+
+  /// Open now (true), closed (false) or unknown (null, nothing shown).
+  final bool? openNow;
+  final String? openLabel;
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    const logo = 50.0;
     final card = Container(
       width: width,
       decoration: BoxDecoration(
         color: MkColors.surface,
         borderRadius: MkRadius.all(MkRadius.lg),
-        boxShadow: const [BoxShadow(color: Color(0x172C123F), blurRadius: 24, offset: Offset(0, 8))],
+        border: Border.all(color: const Color(0xFFEFEAF4)),
+        boxShadow: const [BoxShadow(color: Color(0x142C123F), blurRadius: 22, offset: Offset(0, 10), spreadRadius: -4)],
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -183,91 +199,101 @@ class MkShopCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            height: 124,
+            height: 104 + logo / 2,
             child: Stack(
-              fit: StackFit.expand,
+              clipBehavior: Clip.none,
               children: [
-                MkNetImage(url: coverUrl, fallbackIcon: Icons.storefront_rounded, cacheWidth: 540),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x00000000), Color(0x00000000), Color(0x59000000)],
-                      stops: [0, 0.45, 1],
-                    ),
-                  ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  height: 104,
+                  child: MkNetImage(url: coverUrl, fallbackIcon: Icons.storefront_rounded, cacheWidth: 540),
                 ),
-                PositionedDirectional(
-                  top: 10,
-                  start: 10,
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                      border: Border.all(color: Colors.white, width: 2),
-                      boxShadow: MkShadow.soft,
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: MkNetImage(url: logoUrl, fallbackName: name, cacheWidth: 120),
-                  ),
-                ),
+                if (openNow != null && openLabel != null)
+                  PositionedDirectional(top: 8, start: 8, child: MkOpenChip(open: openNow!, label: openLabel!, compact: true)),
                 if (badge != null)
                   PositionedDirectional(
-                    top: 10,
-                    end: 10,
+                    top: 8,
+                    end: 8,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.93), borderRadius: MkRadius.all(MkRadius.pill)),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.94), borderRadius: MkRadius.all(MkRadius.pill)),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.local_offer_rounded, size: 12, color: MkColors.purple700),
+                          const Icon(Icons.local_offer_rounded, size: 11, color: MkColors.purple700),
                           const SizedBox(width: 3),
-                          Text(badge!, style: t.labelSmall?.copyWith(color: MkColors.purple900)),
+                          Text(badge!, style: t.labelSmall?.copyWith(color: MkColors.purple900, fontSize: 10.5)),
                         ],
                       ),
                     ),
                   ),
-                PositionedDirectional(
-                  bottom: 10,
-                  start: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: MkColors.yellow500,
-                      borderRadius: MkRadius.all(MkRadius.pill),
-                      boxShadow: const [BoxShadow(color: Color(0x26000000), blurRadius: 10, offset: Offset(0, 4))],
+                // The round logo sits on the edge of the banner.
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: Container(
+                      width: logo,
+                      height: logo,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: const [BoxShadow(color: Color(0x332C123F), blurRadius: 12, offset: Offset(0, 4))],
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: MkNetImage(url: logoUrl, fallbackName: name, cacheWidth: 150),
                     ),
-                    child: Text(pointsBackText, style: t.labelSmall?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w800)),
                   ),
                 ),
               ],
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 12),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 4),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.star_rounded, size: 15, color: Color(0xFFF5B400)),
-                    const SizedBox(width: 2),
-                    Text(
-                      rating == 0 ? '–' : rating.toStringAsFixed(1),
-                      style: t.labelSmall?.copyWith(color: MkColors.ink, fontWeight: FontWeight.w700),
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                      ),
                     ),
-                    if (ratingCount != null) Text(' ($ratingCount)', style: t.labelSmall?.copyWith(color: MkColors.ink3)),
-                    const SizedBox(width: 6),
+                    if (friends) ...[const SizedBox(width: 4), MkFriendsBadge(size: 17, label: friendsLabel)],
+                  ],
+                ),
+                const SizedBox(height: 3),
+                MkStars(rating: rating, count: ratingCount, size: 13),
+                const SizedBox(height: 7),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(child: MkProgramBadge(type: programType, label: programLabel)),
+                    const SizedBox(width: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(color: MkColors.yellow500, borderRadius: MkRadius.all(MkRadius.pill)),
+                      child: Text(pointsBackText, style: t.labelSmall?.copyWith(color: MkColors.purple900, fontWeight: FontWeight.w800, fontSize: 10.5)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
                     const Icon(Icons.location_on_rounded, size: 12, color: MkColors.ink3),
-                    const SizedBox(width: 1),
-                    Expanded(
+                    const SizedBox(width: 2),
+                    Flexible(
                       child: Text(
                         addressText,
                         maxLines: 1,
@@ -277,15 +303,6 @@ class MkShopCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Flexible(child: MkProgramBadge(type: programType, label: programLabel)),
-                    const SizedBox(width: 6),
-                    const Spacer(),
-                    Text(pointsText, style: t.labelMedium?.copyWith(color: MkColors.purple700, fontWeight: FontWeight.w800)),
-                  ],
-                ),
               ],
             ),
           ),
@@ -293,6 +310,63 @@ class MkShopCard extends StatelessWidget {
       ),
     );
     return Semantics(button: true, label: name, hint: buttonLabel, child: MkPressable(onTap: onTap, child: card));
+  }
+}
+
+/// The Mukafaah mark in a small purple badge: this shop is a Mukafaah Friend
+/// (it accepts Mukafaah Points).
+class MkFriendsBadge extends StatelessWidget {
+  const MkFriendsBadge({this.size = 18, this.label = 'Mukafaah Friend', super.key});
+  final double size;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        label: label,
+        child: Container(
+          width: size,
+          height: size,
+          padding: EdgeInsets.all(size * 0.17),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF4B2370), MkColors.purple900]),
+            border: Border.all(color: MkColors.yellow500, width: size > 22 ? 1.5 : 1),
+          ),
+          child: MkLogo(height: size, markOnly: true),
+        ),
+      ),
+    );
+  }
+}
+
+/// "Open" (green) or "Closed" (red) with a dot.
+class MkOpenChip extends StatelessWidget {
+  const MkOpenChip({required this.open, required this.label, this.compact = false, super.key});
+  final bool open;
+  final String label;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = open ? MkColors.success : MkColors.danger;
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: compact ? 7 : 10, vertical: compact ? 3 : 5),
+      decoration: BoxDecoration(
+        color: compact ? Colors.white.withValues(alpha: 0.95) : c.withValues(alpha: 0.1),
+        borderRadius: MkRadius.all(MkRadius.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 6, height: 6, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+          const SizedBox(width: 5),
+          Text(label, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: c, fontWeight: FontWeight.w800, fontSize: compact ? 10.5 : 12)),
+        ],
+      ),
+    );
   }
 }
 

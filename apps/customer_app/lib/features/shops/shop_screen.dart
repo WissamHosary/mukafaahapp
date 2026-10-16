@@ -179,7 +179,15 @@ class _ShopBodyState extends ConsumerState<_ShopBody> {
               foregroundColor: Colors.white,
               automaticallyImplyLeading: false,
               leadingWidth: 64,
-              title: Text(c.name, style: t.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
+              // Only when the banners have scrolled away: the banners carry no text.
+              title: AnimatedBuilder(
+                animation: _scroll,
+                builder: (context, child) => Opacity(
+                  opacity: _scroll.hasClients ? ((_scroll.offset - 150) / 60).clamp(0.0, 1.0) : 0,
+                  child: child,
+                ),
+                child: Text(c.name, style: t.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
+              ),
               leading: const Padding(
                 padding: EdgeInsetsDirectional.only(start: 12),
                 child: Center(child: _RoundButton(icon: Icons.arrow_back_rounded)),
@@ -217,7 +225,22 @@ class _ShopBodyState extends ConsumerState<_ShopBody> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(c.name, style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                            Text.rich(
+                              TextSpan(
+                                children: [
+                                  TextSpan(text: c.name),
+                                  if (c.friends)
+                                    WidgetSpan(
+                                      alignment: PlaceholderAlignment.middle,
+                                      child: Padding(
+                                        padding: const EdgeInsetsDirectional.only(start: 6),
+                                        child: MkFriendsBadge(size: 22, label: s.tr('من أصدقاء مكافأة: بيقبل نقاط مكافأة', 'Mukafaah Friend: accepts Mukafaah Points')),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+                            ),
                             const SizedBox(height: 4),
                             Wrap(
                               spacing: 8,
@@ -261,17 +284,11 @@ class _ShopBodyState extends ConsumerState<_ShopBody> {
                     child: Text(c.description!, style: t.bodyMedium?.copyWith(color: MkColors.ink2, height: 1.4)),
                   ),
                 ),
-              if (d.hours != null && d.hours!.isNotEmpty)
+              if (d.openingHours != null || c.temporarilyClosed || (d.hours != null && d.hours!.isNotEmpty))
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.xs, MkSpace.lg, 0),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.schedule_rounded, size: 16, color: MkColors.purple700),
-                        const SizedBox(width: 6),
-                        Expanded(child: Text(d.hours!, style: t.bodySmall?.copyWith(color: MkColors.ink2, fontWeight: FontWeight.w600))),
-                      ],
-                    ),
+                    padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, 0),
+                    child: _HoursCard(d: d),
                   ),
                 ),
               SliverToBoxAdapter(
@@ -340,6 +357,133 @@ class _ShopBodyState extends ConsumerState<_ShopBody> {
             const SliverToBoxAdapter(child: SizedBox(height: MkSpace.xxxl)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Open now / Closed, today's hours, and the whole week on tap.
+class _HoursCard extends ConsumerStatefulWidget {
+  const _HoursCard({required this.d});
+  final ShopDetail d;
+
+  @override
+  ConsumerState<_HoursCard> createState() => _HoursCardState();
+}
+
+class _HoursCardState extends ConsumerState<_HoursCard> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    final d = widget.d;
+    final c = d.card;
+    final week = d.openingHours;
+    final days = [
+      s.tr('الاثنين', 'Monday'),
+      s.tr('الثلاثاء', 'Tuesday'),
+      s.tr('الأربعاء', 'Wednesday'),
+      s.tr('الخميس', 'Thursday'),
+      s.tr('الجمعة', 'Friday'),
+      s.tr('السبت', 'Saturday'),
+      s.tr('الأحد', 'Sunday'),
+    ];
+    String range(DayHours? h) => h == null ? s.tr('مسكّر', 'Closed') : (h.allDay ? s.tr('24 ساعة', 'Open 24 hours') : '${h.open} – ${h.close}');
+    String opens(String at) {
+      final p = at.split(' ');
+      if (p.length == 1) return s.tr('بيفتح الساعة $at', 'Opens at $at');
+      const keys = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+      final i = keys.indexOf(p[0]);
+      return s.tr('بيفتح ${i >= 0 ? days[i] : p[0]} ${p[1]}', 'Opens ${i >= 0 ? days[i] : p[0]} ${p[1]}');
+    }
+
+    final String status;
+    if (c.temporarilyClosed) {
+      status = s.tr('مسكّر مؤقتاً', 'Temporarily closed');
+    } else if (c.openNow == true) {
+      status = c.todayHours == null || c.todayHours!.allDay ? s.tr('مفتوح هلّق', 'Open now') : s.tr('مفتوح لـ ${c.todayHours!.close}', 'Open until ${c.todayHours!.close}');
+    } else if (c.openNow == false) {
+      status = c.opensAt == null ? s.tr('مسكّر', 'Closed') : opens(c.opensAt!);
+    } else {
+      status = '';
+    }
+    final today = DateTime.now().weekday - 1;
+    return Container(
+      decoration: BoxDecoration(color: Colors.white, borderRadius: MkRadius.all(MkRadius.lg), border: Border.all(color: MkColors.line)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            borderRadius: MkRadius.all(MkRadius.lg),
+            onTap: week == null ? null : () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule_rounded, size: 20, color: MkColors.purple700),
+                  const SizedBox(width: 10),
+                  if (c.openNow != null || c.temporarilyClosed) ...[
+                    MkOpenChip(open: c.openNow == true && !c.temporarilyClosed, label: c.openNow == true && !c.temporarilyClosed ? s.tr('مفتوح', 'Open') : s.tr('مسكّر', 'Closed')),
+                    const SizedBox(width: 8),
+                  ],
+                  Expanded(
+                    child: Text(
+                      status.isNotEmpty ? status : (d.hours ?? ''),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w700, color: MkColors.ink),
+                    ),
+                  ),
+                  if (week != null) AnimatedRotation(turns: _open ? 0.5 : 0, duration: MkMotion.base, child: const Icon(Icons.expand_more_rounded, color: MkColors.ink3)),
+                ],
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: MkMotion.base,
+            curve: MkMotion.standard,
+            alignment: Alignment.topCenter,
+            child: !_open || week == null
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                    child: Column(
+                      children: [
+                        const Divider(height: 1),
+                        const SizedBox(height: 6),
+                        for (var i = 0; i < 7; i++)
+                          Container(
+                            margin: const EdgeInsets.symmetric(vertical: 1),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                            decoration: BoxDecoration(color: i == today ? MkColors.purple50 : null, borderRadius: MkRadius.all(MkRadius.sm)),
+                            child: Row(
+                              children: [
+                                Text(days[i], style: t.bodyMedium?.copyWith(fontWeight: i == today ? FontWeight.w800 : FontWeight.w500)),
+                                const Spacer(),
+                                Text(
+                                  range(week[i]),
+                                  textDirection: TextDirection.ltr,
+                                  style: t.bodyMedium?.copyWith(
+                                    color: week[i] == null ? MkColors.danger : MkColors.ink,
+                                    fontWeight: i == today ? FontWeight.w800 : FontWeight.w500,
+                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (d.hours != null && d.hours!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(d.hours!, style: t.bodySmall?.copyWith(color: MkColors.ink2)),
+                          ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -774,7 +918,6 @@ class _BannerHeroState extends State<_BannerHero> {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context).textTheme;
     final items = widget.banners.isEmpty ? [ShopBanner(url: widget.coverUrl ?? '')] : widget.banners;
     return Stack(
       fit: StackFit.expand,
@@ -793,38 +936,26 @@ class _BannerHeroState extends State<_BannerHero> {
             child: MkNetImage(url: items[i].url.isEmpty ? null : items[i].url, fallbackIcon: Icons.storefront_rounded),
           ),
         ),
+        // Only a soft shade at the top so the round buttons stay readable; the banners carry no text.
         const IgnorePointer(
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Color(0x80000000), Color(0x00000000), Color(0x00000000), Color(0x9E1C1024)],
-                stops: [0, 0.3, 0.6, 1],
+                colors: [Color(0x59000000), Color(0x00000000)],
+                stops: [0, 0.35],
               ),
             ),
           ),
         ),
-        if (items[_i].caption != null)
-          PositionedDirectional(
-            start: MkSpace.lg,
-            end: 90,
-            bottom: 18,
-            child: AnimatedSwitcher(
-              duration: MkMotion.base,
-              child: Text(
-                items[_i].caption!,
-                key: ValueKey(_i),
-                maxLines: 2,
-                style: t.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w800, shadows: const [Shadow(blurRadius: 8)]),
-              ),
-            ),
-          ),
         if (items.length > 1)
-          PositionedDirectional(
-            end: MkSpace.lg,
-            bottom: 22,
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 14,
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 for (var i = 0; i < items.length; i++)
                   AnimatedContainer(
