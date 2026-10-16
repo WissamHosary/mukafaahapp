@@ -7,6 +7,8 @@ on:
   push:
     branches: [main]
     paths: ['apps/**', 'packages/**', '.github/workflows/app-check.yml']
+  pull_request:
+    paths: ['apps/**', 'packages/**', '.github/workflows/app-check.yml']
   workflow_dispatch:
 
 jobs:
