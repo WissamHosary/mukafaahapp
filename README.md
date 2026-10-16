@@ -52,3 +52,14 @@ Everyone works from a clone of `https://github.com/WissamHosary/mukafaahapp` and
 7. Never commit secrets: `.env`, keys and Google service files are ignored on purpose.
 
 APKs: *Actions → Build APKs → Run workflow*. The files appear under *Releases → latest*.
+
+## Mukafaah Manager on Netlify
+
+The web dashboard can be live on Netlify, updated automatically on every push to `main` (by either programmer).
+
+1. Netlify → **Add new site → Import an existing project → GitHub** → pick `WissamHosary/mukafaahapp`. The settings come from `netlify.toml`; leave them as they are.
+2. **Site configuration → Environment variables** → add `API_URL` = the public HTTPS address of the Mukafaah server (for example `https://api.mukafaah.app`). Then **Deploys → Trigger deploy**.
+3. Open the Netlify address: it goes straight to the Manager. Sign-in and all data go through Netlify to that server, so it must be online on the internet (a PC at home on Wi-Fi is not reachable from Netlify).
+4. To let the other programmer manage the Netlify site too: **Team settings → Members → Invite**. For code, adding them to the GitHub repo is enough: their pushes deploy as well.
+
+Pull Requests get their own preview link from Netlify, so a change can be checked before it is merged.

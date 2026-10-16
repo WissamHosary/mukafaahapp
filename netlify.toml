@@ -1,0 +1,18 @@
+# Mukafaah Manager (web dashboard) on Netlify.
+#
+# Netlify builds this on every push to GitHub, so whoever pushes (you or the
+# other programmer) updates the live site automatically.
+#
+# The dashboard is static files (backend/admin). It talks to the Mukafaah API
+# through Netlify: /v1/* is passed on to the server set in API_URL
+# (Netlify: Site configuration > Environment variables), e.g.
+#   API_URL = https://api.mukafaah.app
+# The server must be reachable on the internet over HTTPS.
+
+[build]
+  command = "bash tools/netlify/build.sh"
+  publish = "web-dist"
+
+[build.environment]
+  # Nothing to install: the dashboard has no build step.
+  NODE_VERSION = "22"
