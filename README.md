@@ -32,3 +32,23 @@ This is disabled in production.
 7. Owner → **Dashboard** shows bills, points and cashier performance.
 
 See `docs/` for architecture, security, API, database, design system and deployment.
+
+## Working together on this repo
+
+Everyone works from a clone of `https://github.com/WissamHosary/mukafaahapp` and pushes back to it.
+
+1. **First time:** `git clone https://github.com/WissamHosary/mukafaahapp.git` (or in Android Studio: *File → New → Project from Version Control*).
+2. **Before you start each time:** `git pull` so you have the other person's latest work.
+3. **For each change:** make a branch, commit, push it and open a Pull Request into `main`:
+   ```
+   git checkout -b my-change
+   git add -A
+   git commit -m "What changed"
+   git push -u origin my-change
+   ```
+4. GitHub runs **App check** (flutter analyze) and **Backend check** on every push and Pull Request. Merge only when both are green.
+5. After a merge, everyone runs `git pull` on `main` again.
+6. New database changes go in a new numbered file in `backend/sql/` (the next one is `015_...sql`). Never edit a file that is already merged, and restart the server so it runs.
+7. Never commit secrets: `.env`, keys and Google service files are ignored on purpose.
+
+APKs: *Actions → Build APKs → Run workflow*. The files appear under *Releases → latest*.
