@@ -73,6 +73,7 @@
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
     wallet: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M16 13h2"/><path d="M3 10h18"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>',
+    globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   };
   const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
 
@@ -664,66 +665,155 @@
     $('#copyAll', f).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('Copied. Paste it in WhatsApp to the owner.'); } catch { toast('Couldn’t copy here', true); } };
   }
 
-  // ---------- New shop: everything in one page ----------
+  // ---------- New shop: a guided setup, A to Z ----------
+  // Six short steps. Nothing is saved until "Create shop"; then the shop, its
+  // banners, hours, socials, points group and Mukafaah Friends are all set at once.
   async function pageNewShop() {
     crumbs([['Shops', '#shops'], ['New shop']]);
     if (!S.categories.length) await loadCategories();
+    let groups = { programs: [] };
+    try { groups = await api('GET', '/v1/admin/programs'); } catch { /* groups are optional */ }
     let workers = [];
-    const v = mount(ph('New shop', 'Set up everything here: the shop, its photos, the owner’s login, the workers and the online store. The shop just signs in.') + `
+    let banners = []; // { file, url } until the shop exists
+    let pin = null;
+    let step = 0;
+    const STEPS = [
+      ['store', 'Shop', 'Name, category, logo and banners'],
+      ['pin', 'Location', 'Map, hours and how to reach them'],
+      ['coins', 'Points', 'Points back and how points work'],
+      ['users', 'Owner & team', 'Who signs in to the Business app'],
+      ['bag', 'Online store', 'Sell online, or not'],
+      ['check', 'Review', 'Check and create'],
+    ];
+    const grpOpts = (type) => groups.programs.filter((g) => g.type === type && g.active);
+    const v = mount(ph('New shop', 'Six short steps. Nothing is saved until you press Create shop.') + `
+      <ol class="wz-steps" id="wzs">${STEPS.map(([icn, t, sub], i) => `<li data-go="${i}"><span class="n">${i + 1}</span><div><b>${t}</b><small>${sub}</small></div></li>`).join('')}</ol>
       <form class="newshop" id="ns" novalidate>
         <div class="ns-main">
-          <section class="card"><div class="card-h"><span class="stepn">1</span><h3>The shop</h3></div><div class="card-b">
-            <label class="f"><span>Shop name</span><input class="in" name="name" maxlength="80" required placeholder="Cedar Cafe"></label>
+          <section class="card wz" data-step="0"><div class="card-h"><span class="stepn">1</span><h3>The shop</h3></div><div class="card-b">
             <div class="fgrid">
-              <label class="f"><span>Category</span><select class="in" name="category">${S.categories.filter((c) => c.active).map((c) => opt(c.key, c.nameEn, '')).join('')}</select></label>
-              <label class="f"><span>Points back</span><span class="pct" style="width:100%"><input class="in" type="number" name="earnPercent" min="0" max="100" value="10" style="width:100%"></span></label>
-            </div>
-            <div class="fgrid imgs">
-              ${dropHtml('logoMediaId', '', 'Logo', 'Square, at least 400 × 400')}
-              ${dropHtml('coverMediaId', '', 'Banner (cover photo)', 'Wide, about 1600 × 900')}
+              <label class="f"><span>Shop name <i class="req">*</i></span><input class="in" name="name" maxlength="80" required placeholder="Cedar Cafe"></label>
+              <label class="f"><span>Category <i class="req">*</i></span><select class="in" name="category">${S.categories.filter((c) => c.active).map((c) => opt(c.key, c.nameEn, '')).join('')}</select></label>
             </div>
             <label class="f"><span>About the shop</span><textarea class="in" name="description" maxlength="600" placeholder="What they sell, what makes them special"></textarea></label>
+            <div class="fgrid imgs">${dropHtml('logoMediaId', '', 'Logo', 'Square, at least 400 × 400')}
+              <div class="f"><span>Banners <small class="faint">pictures only, no text: they slide at the top of the shop page</small></span>
+                <div class="wz-bn" id="bnl"></div>
+                <button type="button" class="btn sec sm" id="bnAdd">${ic('plus', 'sm')} Add banner pictures</button><input type="file" id="bnFile" accept="image/png,image/jpeg,image/webp" multiple hidden>
+                <em>The first banner is also the picture on the shop’s card. Wide, about 1600 × 900.</em></div></div>
+          </div></section>
+
+          <section class="card wz" data-step="1" hidden><div class="card-h"><span class="stepn">2</span><h3>Location, hours and contact</h3></div><div class="card-b">
             <div class="fgrid">
               <label class="f"><span>City</span><input class="in" name="city" maxlength="60" placeholder="Beirut"></label>
               <label class="f"><span>Area / street</span><input class="in" name="address" maxlength="160" placeholder="Hamra"></label>
-              <label class="f"><span>WhatsApp</span><input class="in" name="whatsapp" inputmode="tel" placeholder="+961 …"></label>
-              <label class="f"><span>Instagram</span><input class="in" name="instagram" maxlength="60" placeholder="@cedarcafe"></label>
             </div>
-            <label class="f"><span>Location</span><input class="in" name="loc" placeholder='Google Maps link or "33.8966, 35.4823"'><em>Puts the shop on the map and in “Near you”.</em></label>
-            <div class="optcard"><div class="swrow">${toggle('featured', false)}<div class="t"><b>Featured</b><small>Shows in Featured shops on the home page.</small></div></div></div>
+            <div class="mp-wrap">
+              <div class="mp" id="mp" tabindex="0" aria-label="Map: click to place the shop"></div>
+              <div class="mp-side"><label class="f"><span>Or paste a Google Maps link</span><input class="in" name="loc" placeholder='Link or "33.8938, 35.5018"'></label>
+                <p class="faint mp-tip">Click the map to drop the pin. Customers see this map on the shop page and find the shop in “Near you”.</p></div>
+            </div>
+            <div class="fsec">Opening hours <small class="faint">The app shows Open now or Closed from these</small></div>
+            ${hoursEditor(null)}
+            <div class="fsec">How customers reach them <small class="faint">Shown as buttons and icons on the shop page</small></div>
+            <div class="fgrid">
+              <label class="f"><span>WhatsApp</span><input class="in" name="whatsapp" inputmode="tel" placeholder="+961 70 123 456"><em>Online store orders go here.</em></label>
+              <label class="f"><span>Shop phone</span><input class="in" name="phone" inputmode="tel" placeholder="+961 1 234 567"></label>
+              <label class="f"><span>Instagram</span><input class="in" name="instagram" maxlength="60" placeholder="@cedarcafe"></label>
+              <label class="f"><span>Facebook</span><input class="in" name="facebook" maxlength="120" placeholder="cedarcafe"></label>
+              <label class="f"><span>TikTok</span><input class="in" name="tiktok" maxlength="60" placeholder="@cedarcafe"></label>
+              <label class="f"><span>Website</span><input class="in" name="website" maxlength="200" placeholder="https://"></label>
+            </div>
           </div></section>
 
-          <section class="card"><div class="card-h"><span class="stepn">2</span><h3>Owner</h3></div><div class="card-b">
+          <section class="card wz" data-step="2" hidden><div class="card-h"><span class="stepn">3</span><h3>Points</h3></div><div class="card-b">
+            <label class="f" style="max-width:260px"><span>Points back on every bill</span><span class="pct" style="width:100%"><input class="in" type="number" name="earnPercent" min="0" max="100" value="10" style="width:100%"></span><em>10% of a $20 bill = 200 points (100 points = $1).</em></label>
+            <div class="fsec">How points work at this shop</div>
+            <div class="wz-pick" id="ptype">
+              <label><input type="radio" name="ptype" value="IN_STORE" checked><span class="k" style="--c:#4B2370">${ic('store')}</span><b>In-Store</b><small>Its own points: collect and spend here.</small></label>
+              <label class="${grpOpts('SHARED').length ? '' : 'dis'}"><input type="radio" name="ptype" value="SHARED" ${grpOpts('SHARED').length ? '' : 'disabled'}><span class="k" style="--c:#0E7C86">${ic('link')}</span><b>Shared group</b><small>Same points at every shop in the group.</small></label>
+              <label class="${grpOpts('NETWORK').length ? '' : 'dis'}"><input type="radio" name="ptype" value="NETWORK" ${grpOpts('NETWORK').length ? '' : 'disabled'}><span class="k" style="--c:#B0507A">${ic('globe')}</span><b>Network group</b><small>One balance; the shop sets how much it takes.</small></label>
+            </div>
+            <div id="grpBox" hidden class="fgrid mt16">
+              <label class="f"><span>Group</span><select class="in" name="groupId"></select></label>
+              <div id="capBox" hidden class="fgrid" style="grid-column:1/-1">
+                <label class="f"><span>Customers can use up to</span><span class="pct" style="width:100%"><input class="in" type="number" name="capPct" min="1" max="100" value="100" style="width:100%"></span><em>Of their balance per visit.</em></label>
+                <label class="f"><span>And at most (optional)</span><div class="inwrap"><input class="in" type="number" name="capPts" min="1" placeholder="No limit"><span class="suf">pts</span></div></label>
+              </div>
+            </div>
+            ${!groups.programs.length ? `<p class="faint" style="margin:8px 0 0">No Shared or Network groups yet. Create them in <a href="#groups">Shared &amp; Network</a>.</p>` : ''}
+            <div class="optcard mt16">
+              <div class="swrow">${toggle('friends', false)}<div class="t"><b>Mukafaah Friend</b><small>Accepts Mukafaah Points. Shows the Mukafaah mark next to its name in the app.</small></div></div>
+              <div class="swrow" id="frRow" hidden><span style="width:44px"></span><label class="f" style="margin:0;max-width:240px"><span>Most Mukafaah Points per bill</span><div class="inwrap"><input class="in" type="number" name="friendsMax" min="0" max="100000" value="300"><span class="suf">pts</span></div></label></div>
+              <div class="swrow">${toggle('featured', false)}<div class="t"><b>Featured</b><small>Shows in Featured shops on the home page.</small></div></div>
+            </div>
+          </div></section>
+
+          <section class="card wz" data-step="3" hidden><div class="card-h"><span class="stepn">4</span><h3>Owner &amp; team</h3></div><div class="card-b">
             <div class="fgrid">
               <label class="f"><span>Owner name</span><input class="in" name="ownerName" maxlength="60" placeholder="Rami Haddad"></label>
-              <label class="f"><span>Owner phone</span><div class="phone-in sm"><span class="cc">${flag}+961</span><input name="ownerPhone" inputmode="tel" placeholder="70 123 456" required></div></label>
+              <label class="f"><span>Owner phone <i class="req">*</i></span><div class="phone-in sm"><span class="cc">${flag}+961</span><input name="ownerPhone" inputmode="tel" placeholder="70 123 456" required></div></label>
               <label class="f"><span>Username for Mukafaah Business</span><input class="in mono" name="ownerUsername" maxlength="32" autocomplete="off" spellcheck="false"><small class="unote" id="un-owner"></small></label>
               ${pwField('ownerPassword', genPassword())}
             </div>
             <div class="optcard hl"><div class="swrow">${toggle('managerAccess', false)}<div class="t"><b>Also give the owner a Manager account</b><small>They can sign in here too and only see their own shop.</small></div></div></div>
-          </div></section>
-
-          <section class="card"><div class="card-h"><span class="stepn">3</span><h3>Workers</h3><span class="sp"></span><button type="button" class="btn sec sm" id="addW">${ic('plus', 'sm')} Add worker</button></div><div class="card-b">
+            <div class="fsec" style="display:flex;align-items:center">Workers<span class="sp" style="flex:1"></span><button type="button" class="btn sec sm" id="addW">${ic('plus', 'sm')} Add worker</button></div>
             <p class="muted" style="margin:0 0 10px">Each worker signs in to Mukafaah Business with their own username and lands on the counter: give points, scan QR, redeem.</p>
             <div id="wl"></div>
           </div></section>
 
-          <section class="card"><div class="card-h"><span class="stepn">4</span><h3>Online store</h3></div><div class="card-b">
-            <div class="optcard"><div class="swrow">${toggle('storeEnabled', false)}<div class="t"><b>Sell online on Mukafaah</b><small>Turns on the shop’s store in the app. After saving you go straight to Online store to add sections and products.</small></div></div></div>
+          <section class="card wz" data-step="4" hidden><div class="card-h"><span class="stepn">5</span><h3>Online store</h3></div><div class="card-b">
+            <p class="muted" style="margin:0 0 12px">Optional. With a store, customers see an <b>Online store</b> tab on the shop page, pick products and send the order to the shop’s WhatsApp. Without one, the tab doesn’t appear at all.</p>
+            <div class="wz-pick two" id="stPick">
+              <label><input type="radio" name="store" value="1"><span class="k" style="--c:#B86E00">${ic('bag')}</span><b>Yes, sell online</b><small>After creating, you go straight to the store to add categories and products with sizes and colours.</small><span class="mini on"><i>Shop</i><i class="a">Online store</i></span></label>
+              <label><input type="radio" name="store" value="0" checked><span class="k" style="--c:#6B6779">${ic('x')}</span><b>No store</b><small>Only the shop page. You can turn the store on any time in the shop’s Online store tab.</small><span class="mini"><i class="a">Shop</i></span></label>
+            </div>
+            <div class="alert warn mt16" id="stWarn" hidden>${ic('alert', 'sm')}<div>Add a WhatsApp number in step 2 so orders can be sent. You can still create the shop now.</div></div>
           </div></section>
+
+          <section class="card wz" data-step="5" hidden><div class="card-h"><span class="stepn">6</span><h3>Review</h3></div><div class="card-b"><div id="rv"></div></div></section>
+
+          <div class="wz-nav"><button type="button" class="btn sec" id="wzBack">${ic('chevl', 'sm')} Back</button><span class="sp" style="flex:1"></span><span class="faint" id="wzCount"></span><button type="button" class="btn" id="wzNext">Next ${ic('chevr', 'sm')}</button><button type="submit" class="btn" id="wzCreate" hidden>${ic('check', 'sm')} Create shop</button></div>
         </div>
-        <aside class="ns-side"><div class="card sticky-col">
-          <div class="ns-pv" id="nspv"></div>
-          <button class="btn" type="submit" style="width:100%">${ic('check', 'sm')} Create shop</button>
-          <p class="muted" style="font-size:12.5px;margin:8px 0 0">You’ll see all logins once after saving, ready to send to the shop.</p>
-        </div></aside>
+        <aside class="ns-side"><div class="card sticky-col"><div class="ns-pv" id="nspv"></div></div></aside>
       </form>`);
     const f = $('#ns', v);
-    wireDrop(f, 'logoMediaId', 512); wireDrop(f, 'coverMediaId', 1600);
+    wireDrop(f, 'logoMediaId', 512);
     wirePw(f);
+    wireHours(f);
     wireUsername(f.elements.ownerUsername, $('#un-owner', f));
     let ownerTouched = false;
     f.elements.ownerUsername.addEventListener('input', () => (ownerTouched = true));
+    const map = mapPicker($('#mp', f), null, (ll) => { pin = ll; f.elements.loc.value = `${ll[0].toFixed(6)}, ${ll[1].toFixed(6)}`; preview(); });
+    f.elements.loc.oninput = () => { const ll = parseLatLng(f.elements.loc.value); if (ll) { pin = ll; map.set(ll); } };
+
+    // Banners: kept in the browser until the shop is created.
+    const drawBanners = () => {
+      $('#bnl', f).innerHTML = banners.map((b, i) => `<div class="wz-bi"><img src="${b.url}" alt=""><span>${i === 0 ? 'Card picture' : i + 1}</span><button type="button" data-bdel="${i}" aria-label="Remove">${ic('x', 'xs')}</button>${i ? `<button type="button" class="l" data-bfirst="${i}" aria-label="Make first">${ic('chevl', 'xs')}</button>` : ''}</div>`).join('') || '<div class="faint" style="padding:6px 0">No banners yet. Without one, the app shows the logo colours.</div>';
+      preview();
+    };
+    $('#bnAdd', f).onclick = () => $('#bnFile', f).click();
+    $('#bnFile', f).onchange = (e) => { for (const file of e.target.files) { if (banners.length >= 10) break; if (/^image\/(png|jpeg|webp)$/.test(file.type)) banners.push({ file, url: URL.createObjectURL(file) }); } e.target.value = ''; drawBanners(); };
+    $('#bnl', f).onclick = (e) => {
+      const d = e.target.closest('[data-bdel]'), m = e.target.closest('[data-bfirst]');
+      if (d) { banners.splice(Number(d.dataset.bdel), 1); drawBanners(); }
+      if (m) { const [x] = banners.splice(Number(m.dataset.bfirst), 1); banners.unshift(x); drawBanners(); }
+    };
+
+    // Points type.
+    const ptype = () => f.querySelector('input[name=ptype]:checked').value;
+    const drawGroup = () => {
+      const t = ptype(); $('#grpBox', f).hidden = t === 'IN_STORE'; $('#capBox', f).hidden = t !== 'NETWORK';
+      if (t !== 'IN_STORE') f.elements.groupId.innerHTML = grpOpts(t).map((g) => `<option value="${esc(g.id)}">${esc(g.name)} · ${g.members.length} shop${g.members.length === 1 ? '' : 's'}</option>`).join('');
+      $$('#ptype label', f).forEach((l) => l.classList.toggle('on', l.querySelector('input').checked));
+    };
+    $('#ptype', f).onchange = () => { drawGroup(); preview(); };
+    f.elements.friends.onchange = () => { $('#frRow', f).hidden = !f.elements.friends.checked; preview(); };
+    $('#stPick', f).onchange = () => { $$('#stPick label', f).forEach((l) => l.classList.toggle('on', l.querySelector('input').checked)); storeWarn(); preview(); };
+    const storeOn = () => f.querySelector('input[name=store]:checked').value === '1';
+    const storeWarn = () => { $('#stWarn', f).hidden = !(storeOn() && !val(f, 'whatsapp')); };
+
+    // Workers.
     const drawWorkers = () => {
       $('#wl', f).innerHTML = workers.length ? workers.map((w, i) => `<div class="wrow" data-i="${i}">
         <label class="f"><span>Name</span><input class="in" data-w="name" value="${esc(w.name)}" maxlength="60" placeholder="Worker name"></label>
@@ -748,52 +838,128 @@
       if (e.target.closest('[data-wgen]')) { workers[i].password = genPassword(); $('[data-w="password"]', row).value = workers[i].password; }
       if (e.target.closest('[data-wpin]')) { workers[i].pin = genPin(); $('[data-w="pin"]', row).value = workers[i].pin; }
     });
+
+    // What's done, for the side panel and the review.
+    const checks = () => {
+      const logo = !!$('[data-drop=logoMediaId] img', f);
+      return [
+        [0, 'Name and category', !!val(f, 'name'), true], [0, 'Logo', logo], [0, 'Banners', banners.length > 0],
+        [1, 'Map pin', !!pin], [1, 'Opening hours', !!readHours(f)], [1, 'WhatsApp', !!val(f, 'whatsapp')],
+        [2, `Points back ${val(f, 'earnPercent') || 0}%`, true],
+        [3, 'Owner phone', !!val(f, 'ownerPhone'), true], [3, `${workers.length} worker${workers.length === 1 ? '' : 's'}`, true],
+        [4, storeOn() ? 'Online store on' : 'No online store', true],
+      ];
+    };
     function preview() {
-      const logo = $('[data-drop=logoMediaId] img', f)?.getAttribute('src'); const cover = $('[data-drop=coverMediaId] img', f)?.getAttribute('src');
+      const logo = $('[data-drop=logoMediaId] img', f)?.getAttribute('src');
+      const cover = banners[0]?.url;
       const name = val(f, 'name') || 'Shop name';
-      $('#nspv', f).innerHTML = `<span class="lbl">In the app</span><div class="pvshop"><div class="cv" ${cover ? `style="background-image:url('${esc(cover)}')"` : ''}><span class="lg">${logo ? `<img src="${esc(logo)}" alt="">` : esc(initials(name))}</span><span class="bk">${esc(val(f, 'earnPercent') || 0)}% back</span></div><div class="bd"><b>${esc(name)}</b><small>${esc([catName(val(f, 'category')), val(f, 'city')].filter(Boolean).join(' · '))}</small></div></div>
-        <ul class="nschk"><li class="${val(f, 'name') ? 'ok' : ''}">Name</li><li class="${logo ? 'ok' : ''}">Logo</li><li class="${cover ? 'ok' : ''}">Banner</li><li class="${val(f, 'ownerPhone') ? 'ok' : ''}">Owner phone</li><li class="${val(f, 'ownerUsername') ? 'ok' : ''}">Owner login</li><li class="ok">${workers.length} worker${workers.length === 1 ? '' : 's'}</li><li class="${f.elements.storeEnabled.checked ? 'ok' : ''}">Online store ${f.elements.storeEnabled.checked ? 'on' : 'off'}</li></ul>`;
+      const t = ptype(); const tl = { IN_STORE: ['In-Store', '#4B2370'], SHARED: ['Shared', '#0E7C86'], NETWORK: ['Network', '#B0507A'] }[t];
+      $('#nspv', f).innerHTML = `<span class="lbl">In the app</span><div class="pvshop2"><div class="cv" ${cover ? `style="background-image:url('${esc(cover)}')"` : ''}>${readHours(f) ? '<span class="op">Open</span>' : ''}</div><span class="lg">${logo ? `<img src="${esc(logo)}" alt="">` : esc(initials(name))}</span>
+        <div class="bd"><b>${esc(name)}${f.elements.friends.checked ? '<i class="mkf" title="Mukafaah Friend"></i>' : ''}</b><small>${esc([catName(val(f, 'category')), val(f, 'city')].filter(Boolean).join(' · ') || 'Category · City')}</small>
+        <div class="pl"><span style="--c:${tl[1]}">${tl[0]}</span><em>${esc(val(f, 'earnPercent') || 0)}% back</em></div></div>
+        ${storeOn() ? '<div class="tabs"><i>Shop</i><i class="on">Online store</i></div>' : ''}</div>
+        <ul class="nschk">${checks().map(([, l, ok, req]) => `<li class="${ok ? 'ok' : ''}">${esc(l)}${req && !ok ? ' <i class="req">*</i>' : ''}</li>`).join('')}</ul>`;
     }
+    const review = () => {
+      const t = ptype(); const g = t === 'IN_STORE' ? null : grpOpts(t).find((x) => x.id === val(f, 'groupId'));
+      const h = readHours(f);
+      const rows = [
+        [0, 'Shop', `${esc(val(f, 'name') || '—')} · ${esc(catName(val(f, 'category')))}`],
+        [0, 'Pictures', `${$('[data-drop=logoMediaId] img', f) ? 'Logo' : 'No logo'} · ${banners.length} banner${banners.length === 1 ? '' : 's'}`],
+        [1, 'Location', `${esc([val(f, 'address'), val(f, 'city')].filter(Boolean).join(', ') || '—')}${pin ? ' · on the map' : ' · no map pin'}`],
+        [1, 'Hours', h ? h.map((d, i) => `${DAYS[i].slice(0, 3)} ${d ? `${d.open}–${d.close}` : 'closed'}`).join(' · ') : 'Not set'],
+        [1, 'Contact', esc(['whatsapp', 'phone', 'instagram', 'facebook', 'tiktok', 'website'].filter((k) => val(f, k)).map((k) => ({ whatsapp: 'WhatsApp', phone: 'Phone', instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', website: 'Website' })[k]).join(', ') || 'None')],
+        [2, 'Points', `${esc(val(f, 'earnPercent') || 0)}% back · ${t === 'IN_STORE' ? 'In-Store' : `${t === 'SHARED' ? 'Shared' : 'Network'} group ${esc(g?.name || '')}${t === 'NETWORK' ? ` · up to ${esc(val(f, 'capPct') || 100)}%${val(f, 'capPts') ? `, max ${esc(val(f, 'capPts'))} pts` : ''}` : ''}`}`],
+        [2, 'Mukafaah Friend', f.elements.friends.checked ? `Yes, up to ${esc(val(f, 'friendsMax') || 0)} pts per bill` : 'No'],
+        [3, 'Owner', `${esc(val(f, 'ownerName') || '—')} · +961 ${esc(val(f, 'ownerPhone') || '—')}${val(f, 'ownerUsername') ? ` · @${esc(val(f, 'ownerUsername'))}` : ''}`],
+        [3, 'Workers', workers.length ? esc(workers.map((w) => w.name || 'Unnamed').join(', ')) : 'None'],
+        [4, 'Online store', storeOn() ? 'On: the Online store tab shows in the app' : 'Off: no store tab'],
+      ];
+      $('#rv', f).innerHTML = `<dl class="wz-rv">${rows.map(([st, k, val2]) => `<div><dt>${k}</dt><dd>${val2}</dd><button type="button" class="btn ghost sm" data-go="${st}">Edit</button></div>`).join('')}</dl>`;
+    };
+    const valid = (i) => {
+      if (i === 0 && !val(f, 'name')) { toast('Add the shop name.', true); f.elements.name.focus(); return false; }
+      if (i === 1) {
+        if (val(f, 'loc') && !parseLatLng(val(f, 'loc'))) { toast('Couldn’t read that location.', true); return false; }
+        const web = val(f, 'website'); if (web && !/^https?:\/\/\S+$/.test(web)) { toast('Start the website with https://', true); return false; }
+      }
+      if (i === 3) {
+        if (!val(f, 'ownerPhone')) { toast('Add the owner’s phone.', true); f.elements.ownerPhone.focus(); return false; }
+        const ou = val(f, 'ownerUsername').toLowerCase();
+        if (ou && !USER_RE.test(ou)) { toast('Check the owner’s username.', true); return false; }
+        if (ou && val(f, 'ownerPassword').length < 8) { toast('Passwords need at least 8 characters.', true); return false; }
+        if (workers.some((w) => w.pin && !PIN_RE.test(w.pin.trim()))) { toast('Counter PINs are 4 to 6 digits.', true); return false; }
+        if (workers.some((w) => !w.name.trim() || !USER_RE.test(w.username.trim().toLowerCase()) || w.password.length < 8)) { toast('Each worker needs a name, a username and a password of 8+ characters.', true); return false; }
+      }
+      return true;
+    };
+    const go = (i) => {
+      if (i > step) { for (let k = step; k < i; k++) if (!valid(k)) { i = k; break; } }
+      step = Math.max(0, Math.min(STEPS.length - 1, i));
+      $$('.wz', f).forEach((sec) => (sec.hidden = Number(sec.dataset.step) !== step));
+      $$('#wzs li', v).forEach((li, k) => { li.classList.toggle('on', k === step); li.classList.toggle('done', k < step); });
+      $('#wzBack', f).style.visibility = step ? 'visible' : 'hidden';
+      $('#wzNext', f).hidden = step === STEPS.length - 1; $('#wzCreate', f).hidden = step !== STEPS.length - 1;
+      $('#wzCount', f).textContent = `Step ${step + 1} of ${STEPS.length}`;
+      if (step === 1) setTimeout(() => map.set(pin), 0);
+      if (step === STEPS.length - 1) review();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    $('#wzNext', f).onclick = () => go(step + 1);
+    $('#wzBack', f).onclick = () => go(step - 1);
+    v.addEventListener('click', (e) => { const g = e.target.closest('[data-go]'); if (g) go(Number(g.dataset.go)); });
     f.addEventListener('input', (e) => {
       if (e.target.name === 'name' && !ownerTouched) { f.elements.ownerUsername.value = slug(val(f, 'name')); f.elements.ownerUsername.dispatchEvent(new Event('input')); ownerTouched = false; }
+      if (e.target.name === 'whatsapp') storeWarn();
       preview();
     });
     f.addEventListener('change', preview);
-    drawWorkers();
+    drawWorkers(); drawBanners(); drawGroup(); go(0);
+
     f.onsubmit = async (e) => {
       e.preventDefault();
-      const ll = parseLatLng(val(f, 'loc'));
-      if (val(f, 'loc') && !ll) { toast('Couldn’t read that location. Paste a Google Maps link or "lat, lng".', true); return; }
-      if (!val(f, 'name') || !val(f, 'ownerPhone')) { toast('Add the shop name and the owner’s phone.', true); return; }
+      for (let k = 0; k < STEPS.length - 1; k++) if (!valid(k)) { go(k); return; }
       const ou = val(f, 'ownerUsername').toLowerCase(); const op = val(f, 'ownerPassword');
-      if (ou && !USER_RE.test(ou)) { toast('Check the owner’s username.', true); return; }
-      if (ou && op.length < 8) { toast('Passwords need at least 8 characters.', true); return; }
       const ws = workers.map((w) => ({ name: w.name.trim(), username: w.username.trim().toLowerCase(), password: w.password, ...(w.pin ? { pin: w.pin.trim() } : {}) }));
-      if (ws.some((w) => w.pin && !PIN_RE.test(w.pin))) { toast('Counter PINs are 4 to 6 digits.', true); return; }
-      const bad = ws.find((w) => !w.name || !USER_RE.test(w.username) || w.password.length < 8);
-      if (bad) { toast('Each worker needs a name, a username and a password of 8+ characters.', true); return; }
-      const body = {
-        name: val(f, 'name'), category: val(f, 'category'), ownerPhone: val(f, 'ownerPhone'), earnPercent: Math.round(Number(val(f, 'earnPercent')) || 0),
-        managerAccess: f.elements.managerAccess.checked, featured: f.elements.featured.checked, storeEnabled: f.elements.storeEnabled.checked,
-        ...(val(f, 'ownerName') ? { ownerName: val(f, 'ownerName') } : {}), ...(val(f, 'city') ? { city: val(f, 'city') } : {}),
-        ...(val(f, 'address') ? { address: val(f, 'address') } : {}), ...(val(f, 'whatsapp') ? { whatsapp: val(f, 'whatsapp') } : {}),
-        ...(val(f, 'instagram') ? { instagram: val(f, 'instagram').replace(/^@/, '') } : {}), ...(val(f, 'description') ? { description: val(f, 'description') } : {}),
-        ...(ll ? { lat: ll[0], lng: ll[1] } : {}),
-        ...(val(f, 'logoMediaId') ? { logoMediaId: val(f, 'logoMediaId') } : {}), ...(val(f, 'coverMediaId') ? { coverMediaId: val(f, 'coverMediaId') } : {}),
-        ...(ou ? { ownerUsername: ou, ownerPassword: op } : {}),
-        workers: ws,
-      };
-      const btn = $('button[type=submit]', f); btn.disabled = true;
+      const btn = $('#wzCreate', f); btn.disabled = true; btn.innerHTML = `${ic('refresh', 'sm')} Creating…`;
       try {
+        // The first banner doubles as the cover picture on the shop's card.
+        let coverId = null;
+        if (banners[0]) coverId = (await uploadImage(banners[0].file, 1600)).id;
+        const body = {
+          name: val(f, 'name'), category: val(f, 'category'), ownerPhone: val(f, 'ownerPhone'), earnPercent: Math.round(Number(val(f, 'earnPercent')) || 0),
+          managerAccess: f.elements.managerAccess.checked, featured: f.elements.featured.checked, storeEnabled: storeOn(),
+          ...(val(f, 'ownerName') ? { ownerName: val(f, 'ownerName') } : {}), ...(val(f, 'city') ? { city: val(f, 'city') } : {}),
+          ...(val(f, 'address') ? { address: val(f, 'address') } : {}), ...(val(f, 'whatsapp') ? { whatsapp: val(f, 'whatsapp') } : {}),
+          ...(val(f, 'instagram') ? { instagram: val(f, 'instagram').replace(/^@/, '') } : {}), ...(val(f, 'description') ? { description: val(f, 'description') } : {}),
+          ...(pin ? { lat: pin[0], lng: pin[1] } : {}),
+          ...(val(f, 'logoMediaId') ? { logoMediaId: val(f, 'logoMediaId') } : {}), ...(coverId ? { coverMediaId: coverId } : {}),
+          ...(ou ? { ownerUsername: ou, ownerPassword: op } : {}),
+          workers: ws,
+        };
         const r = await api('POST', '/v1/admin/shops', body);
+        const base2 = `/v1/admin/shops/${r.id}`; const later = [];
+        // Everything else, now that the shop exists. A failure here doesn't lose the shop.
+        const prof = { openingHours: readHours(f) };
+        for (const k of ['phone', 'facebook', 'website']) if (val(f, k)) prof[k] = val(f, k);
+        if (val(f, 'tiktok')) prof.tiktok = val(f, 'tiktok').replace(/^@/, '');
+        try { await api('PATCH', `${base2}/profile`, prof); } catch (err) { later.push('hours and contact'); }
+        for (const b of banners) { try { await uploadImage(b.file, 1600, { path: `${base2}/banners`, purpose: false }); } catch { later.push('a banner'); } }
+        const t = ptype();
+        if (t !== 'IN_STORE' && val(f, 'groupId')) {
+          try {
+            await api('PUT', `/v1/admin/programs/${val(f, 'groupId')}/members/${r.id}`, { active: true, ...(t === 'NETWORK' ? { maxPercent: Math.round(Number(val(f, 'capPct')) || 100), maxPoints: val(f, 'capPts') ? Math.round(Number(val(f, 'capPts'))) : null } : {}) });
+          } catch { later.push('the points group'); }
+        }
+        if (f.elements.friends.checked) { try { await api('PATCH', `${base2}/friends`, { enabled: true, maxPoints: Math.round(Number(val(f, 'friendsMax')) || 0) }); } catch { later.push('Mukafaah Friends'); } }
         S.shops = [];
-        const go = () => { location.hash = 'shop/' + r.id + (body.storeEnabled ? '/store' : '/overview'); };
+        const goShop = () => { location.hash = 'shop/' + r.id + (body.storeEnabled ? '/store' : '/overview'); };
         const creds = [...(ou ? [{ role: 'Owner', name: val(f, 'ownerName'), username: ou, password: op }] : []), ...ws.map((w) => ({ role: 'Worker', name: w.name, username: w.username, password: w.password, pin: w.pin }))];
-        toast('Shop created');
-        if (creds.length) showCredentials(body.name, creds, go); else go();
-      } catch (err) { fail(err); } finally { btn.disabled = false; }
+        toast(later.length ? `Shop created. Couldn’t save ${later.join(', ')}: set it in the shop’s Profile.` : 'Shop created and live in the app', !!later.length);
+        if (creds.length) showCredentials(body.name, creds, goShop); else goShop();
+      } catch (err) { fail(err); } finally { btn.disabled = false; btn.innerHTML = `${ic('check', 'sm')} Create shop`; }
     };
-    preview();
   }
 
   // =====================================================================
