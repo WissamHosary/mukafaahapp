@@ -5,6 +5,8 @@ name: mukafaah
 services:
   db:
     image: postgres:18
+    # Comes back by itself when Docker Desktop starts (after a PC restart).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: mukafaah
       POSTGRES_PASSWORD: mukafaah_dev_only
@@ -21,6 +23,7 @@ services:
 
   api:
     build: ./backend
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
