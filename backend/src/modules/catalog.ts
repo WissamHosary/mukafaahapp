@@ -93,6 +93,7 @@ function nearFirst<T extends { distanceKm?: number | null }>(items: Array<T & { 
   });
   return out.map((x) => x.item);
 }
+// Stars only. Older app versions may still send a comment; it is ignored.
 const zRating = z.strictObject({ stars: z.number().int().min(1).max(5), comment: z.string().trim().max(500).optional() });
 
 const LIVE_OFFER = `o.status = 'ACTIVE' AND NOT o.hidden_by_admin AND o.valid_from <= current_date AND (o.valid_to IS NULL OR o.valid_to >= current_date)`;
@@ -380,7 +381,7 @@ export class CatalogController {
         `SELECT r.stars, r.comment, r.updated_at, u.name, r.user_id = $2 AS mine
            FROM business_ratings r JOIN users u ON u.id = r.user_id
           WHERE r.business_id = $1 AND NOT r.hidden
-          ORDER BY (r.comment IS NOT NULL AND r.comment <> '') DESC, r.updated_at DESC LIMIT 20`,
+          ORDER BY r.updated_at DESC LIMIT 20`,
         [bid, a.userId],
       ),
       this.db.query(
@@ -424,7 +425,7 @@ export class CatalogController {
       reviews: reviews.rows.map((x) => ({
         name: reviewerName(x.name),
         stars: Number(x.stars),
-        comment: x.comment ?? null,
+        comment: null, // ratings are stars only
         at: x.updated_at,
         mine: !!x.mine,
       })),
@@ -445,7 +446,7 @@ export class CatalogController {
       rewards: rewards.rows.map((w) => rewardJson(w, card.myPoints)),
       // A preview of the store; the full store is GET shops/:id/store.
       products: products.rows.map(listJson),
-      myRating: mine ? { stars: mine.stars, comment: mine.comment ?? null } : null,
+      myRating: mine ? { stars: mine.stars, comment: null } : null,
       canRate: !!visited,
     };
   }
@@ -463,16 +464,17 @@ export class CatalogController {
     if (!visited) throw new AppError(403, 'RATE_AFTER_VISIT', 'You can rate a shop after your first visit');
     await this.db.tx(async (c) => {
       await c.query(
-        `INSERT INTO business_ratings(business_id, user_id, stars, comment) VALUES ($1,$2,$3,$4)
-         ON CONFLICT (business_id, user_id) DO UPDATE SET stars = EXCLUDED.stars, comment = EXCLUDED.comment, updated_at = now()`,
-        [bid, a.userId, b.stars, b.comment ?? null],
+        // Stars only: a customer can't write text, so there is nothing to moderate.
+        `INSERT INTO business_ratings(business_id, user_id, stars, comment) VALUES ($1,$2,$3,NULL)
+         ON CONFLICT (business_id, user_id) DO UPDATE SET stars = EXCLUDED.stars, comment = NULL, updated_at = now()`,
+        [bid, a.userId, b.stars],
       );
       const stars = '★'.repeat(b.stars);
       await alertBusiness(
         c,
         bid,
         'RATING',
-        { ar: { title: `تقييم جديد ${stars}`, body: b.comment || undefined }, en: { title: `New rating ${stars}`, body: b.comment || undefined } },
+        { ar: { title: `تقييم جديد ${stars}` }, en: { title: `New rating ${stars}` } },
         null,
       );
     });
