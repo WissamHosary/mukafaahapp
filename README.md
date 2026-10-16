@@ -53,6 +53,22 @@ Everyone works from a clone of `https://github.com/WissamHosary/mukafaahapp` and
 
 APKs: *Actions → Build APKs → Run workflow*. The files appear under *Releases → latest*.
 
+## Working on the Manager (admin panel) locally
+
+The Manager lives in `backend/admin` (`app.js`, `styles.css`, `index.html`) - plain files, no build step.
+`tools\MANAGER-DEV.bat` serves them straight from disk on http://localhost:5173/admin and forwards
+every `/v1` call to a Mukafaah API, so an edit shows on a browser refresh (no Docker rebuild).
+It needs Node.js only, no packages.
+
+Pick the API it talks to:
+- **Wissam's PC (same Wi-Fi):** Wissam runs `tools\START-SERVER.bat` (it prints his IP) and `tools\ALLOW-PHONES.bat` once;
+  you run `tools\MANAGER-DEV.bat http://<his IP>:3000`. You see and change the same data as his phones.
+- **Your own server:** install Docker Desktop, run `tools\START-SERVER.bat`, then `tools\MANAGER-DEV.bat` and press Enter.
+  Run `tools\SEED-DEMO.bat` for demo shops.
+
+Signing in: in development the code shows on screen. On a fresh server the first person to sign in
+becomes the Manager owner; on Wissam's server, he adds you under Accounts.
+
 ## Mukafaah Manager on Netlify
 
 The web dashboard can be live on Netlify, updated automatically on every push to `main` (by either programmer).
