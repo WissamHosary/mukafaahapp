@@ -56,8 +56,12 @@ export class CryptoService implements OnModuleInit {
     const file = join(config.KEYS_DIR, 'keys.json');
     let k: KeyFile;
     try {
-      k = JSON.parse(await readFile(file, 'utf8')) as KeyFile;
+      const raw = config.KEYS_JSON.trim();
+      k = raw
+        ? (JSON.parse(raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8')) as KeyFile)
+        : (JSON.parse(await readFile(file, 'utf8')) as KeyFile);
     } catch {
+      if (config.KEYS_JSON.trim()) throw new Error('KEYS_JSON is set but is not valid');
       if (config.NODE_ENV === 'production') throw new Error('Key file missing in production');
       const { privateKey, publicKey } = await generateKeyPair('ES256', { extractable: true });
       k = {

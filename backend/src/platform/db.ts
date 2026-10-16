@@ -65,6 +65,23 @@ export class Db implements OnModuleDestroy {
       });
       this.log.log(`Applied migration ${f}`);
     }
+    await this.lockDownPublicApi();
+  }
+
+  /**
+   * On Supabase every table in "public" is also open through its automatic
+   * Data API. The server connects as the owner and is not affected, but
+   * turning row level security on (with no policies) closes that door.
+   */
+  private async lockDownPublicApi() {
+    const r = await this.pool.query(`SELECT 1 FROM pg_roles WHERE rolname = 'anon'`);
+    if (!r.rowCount) return;
+    const t = await this.pool.query(
+      `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity`,
+    );
+    for (const row of t.rows) await this.pool.query(`ALTER TABLE public."${String(row.relname).replace(/"/g, '""')}" ENABLE ROW LEVEL SECURITY`);
+    if (t.rowCount) this.log.log(`Locked ${t.rowCount} tables against the public Data API`);
   }
 
   async onModuleDestroy() {
@@ -77,7 +94,12 @@ export class Db implements OnModuleDestroy {
   providers: [
     {
       provide: PG_POOL,
-      useFactory: () => new pg.Pool({ connectionString: config.DATABASE_URL, max: 20 }),
+      useFactory: () => new pg.Pool({
+          connectionString: config.DATABASE_URL,
+          max: 20,
+          // Hosted Postgres uses TLS through its own pooler certificate.
+          ...(config.DATABASE_SSL ? { ssl: { rejectUnauthorized: false } } : {}),
+        }),
     },
     Db,
   ],

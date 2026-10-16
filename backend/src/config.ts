@@ -5,6 +5,15 @@ const schema = z.object({
   PORT: z.coerce.number().int().default(3000),
   DATABASE_URL: z.string().min(1),
   KEYS_DIR: z.string().default('/app/keys'),
+  // Hosted servers have no lasting disk: the keys come from this variable instead
+  // (the keys.json content, as JSON or base64). Keep it secret and never change it:
+  // phone numbers are encrypted with it.
+  KEYS_JSON: z.string().default(''),
+  // Hosted databases (Supabase, Neon, ...) need an encrypted connection.
+  DATABASE_SSL: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
   // In development the OTP code is also returned in the API response so the
   // apps can be tested without an SMS provider. Never enabled in production.
   OTP_DEV_ECHO: z

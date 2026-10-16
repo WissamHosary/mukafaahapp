@@ -63,3 +63,17 @@ The web dashboard can be live on Netlify, updated automatically on every push to
 4. To let the other programmer manage the Netlify site too: **Team settings → Members → Invite**. For code, adding them to the GitHub repo is enough: their pushes deploy as well.
 
 Pull Requests get their own preview link from Netlify, so a change can be checked before it is merged.
+
+## Putting the server online (Supabase + Render)
+
+The data lives in **Supabase** (PostgreSQL) and the Mukafaah API runs on **Render**. Netlify shows the Manager and passes its calls to Render.
+
+1. **Supabase:** create a project (region: Frankfurt/eu-central). Then **Connect → Session pooler** and copy the connection string (with your database password filled in).
+2. **Keys:** on the PC, with the server running, double-click `tools\MAKE-SERVER-KEYS.bat`. It saves `tools\server-keys.txt` (secret, never on GitHub).
+3. **Render:** New → **Blueprint** → pick this repo (it reads `render.yaml`). Fill in:
+   `DATABASE_URL` = the Supabase string, `KEYS_JSON` = the text from step 2, `ADMIN_PHONES` = your phone (e.g. `70123456`).
+   On first start the server creates all the tables in Supabase by itself. It also locks Supabase's public Data API, since everything goes through the Mukafaah server.
+4. **Netlify:** set `API_URL` to the Render address (e.g. `https://mukafaah-api.onrender.com`) and redeploy.
+5. **Apps:** build the APKs with that same address (Actions → Build APKs → `api_url`), or type it under **Server** on the app's first screen.
+
+Every push to `main` redeploys Render (server) and Netlify (Manager) automatically.

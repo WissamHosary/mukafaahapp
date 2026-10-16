@@ -1,0 +1,42 @@
+# Mukafaah API on Render, with the database on Supabase.
+# Render: New > Blueprint > pick this GitHub repo. It deploys again on every push to main.
+services:
+  - type: web
+    name: mukafaah-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    region: frankfurt
+    plan: starter            # always on; "free" works for trying it but sleeps when idle
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Test phase: sign-in codes are shown on screen. At launch set NODE_ENV=production,
+      # OTP_DEV_ECHO=false and the WhatsApp settings below.
+      - key: NODE_ENV
+        value: staging
+      - key: OTP_DEV_ECHO
+        value: "true"
+      - key: TRUST_PROXY
+        value: "true"
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DEFAULT_PHONE_REGION
+        value: LB
+      - key: OTP_ALLOWED_COUNTRIES
+        value: LB
+      - key: OTP_PROVIDER
+        value: console
+      # Set these in the Render dashboard (secret, not in GitHub):
+      - key: DATABASE_URL       # Supabase > Connect > Session pooler connection string
+        sync: false
+      - key: KEYS_JSON          # from tools\MAKE-SERVER-KEYS.bat, never change it later
+        sync: false
+      - key: ADMIN_PHONES       # your phone, e.g. 70123456 (Mukafaah Manager owner)
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: GOOGLE_CLIENT_IDS
+        sync: false

@@ -24,3 +24,4 @@ backend/keys/
 tools/logs/
 tools/admin-phone.txt
 web-dist/
+tools/server-keys.txt
