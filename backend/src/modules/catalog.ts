@@ -40,9 +40,14 @@ const zShops = z.object({
   q: z.string().trim().max(60).optional(),
   category: z.string().regex(/^[A-Z0-9_]{2,40}$/).optional(),
   type: z.enum(['IN_STORE', 'SHARED', 'NETWORK']).optional(),
-  sort: z.enum(['popular', 'rating', 'name', 'newest', 'points']).default('popular'),
+  sort: z.enum(['popular', 'rating', 'name', 'name_desc', 'newest', 'points', 'nearest', 'friends']).default('popular'),
   featured: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+  /** Only shops that accept Mukafaah Points. */
+  friends: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
   limit: z.coerce.number().int().min(1).max(200).default(100),
+  // For "nearest": the member's location.
+  lat: z.coerce.number().min(-90).max(90).optional(),
+  lng: z.coerce.number().min(-180).max(180).optional(),
 });
 const zOffers = z.object({
   category: z.string().regex(/^[A-Z0-9_]{2,40}$/).optional(),
@@ -111,7 +116,15 @@ export class CatalogController {
       name: 'b.name',
       newest: 'b.created_at DESC',
       points: 'my_points DESC, popularity DESC',
+      name_desc: 'b.name DESC',
+      // Rough distance is enough to order by; shops without a pin go last.
+      nearest:
+        f.lat != null && f.lng != null
+          ? `(b.lat IS NULL), power(b.lat - $7::float8, 2) + power((b.lng - $8::float8) * cos(radians($7::float8)), 2), b.name`
+          : 'b.featured DESC, popularity DESC, b.name',
+      friends: 'b.friends_enabled DESC, popularity DESC, b.name',
     }[f.sort];
+    const near = f.sort === 'nearest' && f.lat != null && f.lng != null;
     const r = await this.db.query(
       `SELECT ${SHOP_CARD_SELECT}
          FROM businesses b ${SHOP_CARD_JOINS}
@@ -120,9 +133,11 @@ export class CatalogController {
           AND ($3::text IS NULL OR b.category = $3)
           AND ($4::text IS NULL OR p.type = $4)
           AND ($5::boolean IS NULL OR b.featured = $5)
+          AND (NOT $9::boolean OR b.friends_enabled)
+          AND ($7::float8 IS NULL OR $8::float8 IS NOT NULL OR true)
         ORDER BY ${order}
         LIMIT $6`,
-      [userId, f.q || null, f.category ?? null, f.type ?? null, f.featured ?? null, f.limit],
+      [userId, f.q || null, f.category ?? null, f.type ?? null, f.featured ?? null, f.limit, near ? f.lat : null, near ? f.lng : null, f.friends === true],
     );
     return r.rows.map(shopCard);
   }
@@ -403,6 +418,8 @@ export class CatalogController {
         phone: r.phone ?? null,
       },
       hours: r.hours ?? null,
+      /** 7 days, Monday first: null = closed, else {open, close}. */
+      openingHours: r.opening_hours ?? null,
       banners: banners.rows.map((x) => ({ url: mediaUrl(x.media_id), caption: x.caption ?? null })),
       reviews: reviews.rows.map((x) => ({
         name: reviewerName(x.name),

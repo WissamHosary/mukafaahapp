@@ -62,9 +62,15 @@ const zProduct = z.strictObject({
 });
 const zProductPatch = z.strictObject(productFields).partial().extend({ archived: z.boolean().optional() });
 const zStore = z.strictObject({ enabled: z.boolean() });
-const zCategory = z.strictObject({ name: z.string().trim().min(1).max(40), sort: z.number().int().min(0).max(10000).optional() });
+const zCategory = z.strictObject({
+  name: z.string().trim().min(1).max(40),
+  sort: z.number().int().min(0).max(10000).optional(),
+  /** Picture for the category tile (an uploaded image). */
+  imageId: zUuid.nullable().optional(),
+});
 const zCategoryPatch = z.strictObject({
   name: z.string().trim().min(1).max(40).optional(),
+  imageId: zUuid.nullable().optional(),
   sort: z.number().int().min(0).max(10000).optional(),
   active: z.boolean().optional(),
 });
@@ -260,7 +266,7 @@ export class StoreOwnerController {
       enabled: !!b?.store_enabled,
       hasWhatsapp: !!b?.whatsapp,
       newOrders: orders?.n ?? 0,
-      categories: cats.rows.map((c) => ({ id: c.id, name: c.name, sort: c.sort, products: c.products })),
+      categories: cats.rows.map((c) => ({ id: c.id, name: c.name, sort: c.sort, products: c.products, imageId: c.media_id ?? null, imageUrl: mediaUrl(c.media_id) })),
       products: prods.rows.map(listJson),
     };
   }
@@ -281,9 +287,10 @@ export class StoreOwnerController {
     const b = parse(zCategory, body);
     const n = await this.db.one(`SELECT count(*)::int AS n FROM store_categories WHERE business_id = $1 AND active`, [a.businessId]);
     if ((n?.n ?? 0) >= 50) throw new AppError(409, 'LIMIT_REACHED', 'Up to 50 categories');
+    if (b.imageId) await this.ownMedia([b.imageId], a.businessId);
     const r = await this.db.one(
-      `INSERT INTO store_categories(business_id, name, sort) VALUES ($1,$2,$3) RETURNING id`,
-      [a.businessId, b.name, b.sort ?? (n?.n ?? 0) * 10],
+      `INSERT INTO store_categories(business_id, name, sort, media_id) VALUES ($1,$2,$3,$4) RETURNING id`,
+      [a.businessId, b.name, b.sort ?? (n?.n ?? 0) * 10, b.imageId ?? null],
     );
     return { id: r.id };
   }
@@ -291,10 +298,12 @@ export class StoreOwnerController {
   @Patch('categories/:id')
   async patchCategory(@Auth() a: OwnerAuth, @Param('id') id: string, @Body() body: unknown) {
     const b = parse(zCategoryPatch, body);
+    if (b.imageId) await this.ownMedia([b.imageId], a.businessId);
     const r = await this.db.query(
-      `UPDATE store_categories SET name = COALESCE($3, name), sort = COALESCE($4, sort), active = COALESCE($5, active)
+      `UPDATE store_categories SET name = COALESCE($3, name), sort = COALESCE($4, sort), active = COALESCE($5, active),
+              media_id = CASE WHEN $6::boolean THEN $7::uuid ELSE media_id END
         WHERE id = $1 AND business_id = $2`,
-      [parse(zUuid, id), a.businessId, b.name ?? null, b.sort ?? null, b.active ?? null],
+      [parse(zUuid, id), a.businessId, b.name ?? null, b.sort ?? null, b.active ?? null, b.imageId !== undefined, b.imageId ?? null],
     );
     if (!r.rowCount) throw Errors.notFound('Category');
     if (b.active === false) await this.db.query(`UPDATE products SET category_id = NULL WHERE category_id = $1`, [id]);
@@ -501,7 +510,7 @@ export class StoreCustomerController {
     const bid = parse(zUuid, id);
     const b = await this.openStore(bid);
     const [cats, prods] = await Promise.all([
-      this.db.query(`SELECT id, name FROM store_categories WHERE business_id = $1 AND active ORDER BY sort, created_at`, [bid]),
+      this.db.query(`SELECT id, name, media_id FROM store_categories WHERE business_id = $1 AND active ORDER BY sort, created_at`, [bid]),
       this.db.query(`${PRODUCT_LIST} WHERE p.business_id = $1 AND NOT p.archived AND p.available ORDER BY p.featured DESC, p.sort, p.created_at`, [bid]),
     ]);
     const products = prods.rows.map(listJson);
@@ -509,7 +518,7 @@ export class StoreCustomerController {
     return {
       shopName: b.name,
       canOrder: !!b.whatsapp,
-      categories: cats.rows.filter((c) => used.has(c.id)).map((c) => ({ id: c.id, name: c.name })),
+      categories: cats.rows.filter((c) => used.has(c.id)).map((c) => ({ id: c.id, name: c.name, imageUrl: mediaUrl(c.media_id) })),
       products,
     };
   }

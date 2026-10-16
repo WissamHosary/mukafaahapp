@@ -36,7 +36,8 @@ export const pointsValueMinor = (points: number, redeemPerUnit: number) =>
  */
 export const SHOP_CARD_SELECT = `
   b.id, b.name, b.category, b.featured, b.address, b.city, b.lat, b.lng, b.whatsapp,
-  b.logo_media_id, b.cover_media_id, b.description,
+  b.logo_media_id, b.cover_media_id, b.description, b.friends_enabled, b.opening_hours, b.temporarily_closed,
+  (SELECT bb.media_id FROM business_banners bb WHERE bb.business_id = b.id ORDER BY bb.sort, bb.created_at LIMIT 1) AS banner_media_id,
   p.id AS program_id, p.type AS program_type, p.earn_points_per_unit, p.redeem_points_per_unit,
   COALESCE(r.avg, 0) AS rating, COALESCE(r.cnt, 0) AS rating_count,
   COALESCE(bal.balance, 0) AS my_points,
@@ -77,8 +78,64 @@ export function shopCard(r: any) {
     lng: r.lng === null || r.lng === undefined ? null : Number(r.lng),
     logoUrl: mediaUrl(r.logo_media_id),
     coverUrl: mediaUrl(r.cover_media_id),
+    /** First shop banner (falls back to the cover), for the shop's card. */
+    bannerUrl: mediaUrl(r.banner_media_id ?? r.cover_media_id),
     hasWhatsapp: !!r.whatsapp,
+    /** Accepts Mukafaah Points ("Mukafaah Friends"). */
+    friends: !!r.friends_enabled,
+    ...openState(r.opening_hours ?? null, !!r.temporarily_closed),
   };
+}
+
+// ---------- Opening hours ----------
+export type DayHours = { open: string; close: string } | null;
+export const SHOP_TZ = 'Asia/Beirut';
+const DAY_KEYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
+
+const minutes = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+};
+
+/** Day of week (0 = Monday) and minutes since midnight in the shops' time zone. */
+export function shopClock(now = new Date()): { day: number; min: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: SHOP_TZ, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  const day = DAY_KEYS.indexOf(get('weekday').toUpperCase().slice(0, 3) as (typeof DAY_KEYS)[number]);
+  return { day: day < 0 ? 0 : day, min: Number(get('hour')) * 60 + Number(get('minute')) };
+}
+
+function openOn(d: DayHours, min: number): boolean {
+  if (!d) return false;
+  const o = minutes(d.open), c = minutes(d.close);
+  if (o === c) return true; // 24 hours
+  return o < c ? min >= o && min < c : min >= o; // past midnight: the evening part
+}
+
+/**
+ * Open now? null when the shop hasn't set weekly hours. Also today's hours
+ * and, when closed, when it opens next.
+ */
+export function openState(hours: DayHours[] | null, temporarilyClosed: boolean, now = new Date()) {
+  if (temporarilyClosed) return { openNow: false as boolean | null, temporarilyClosed: true, todayHours: null as DayHours, opensAt: null as string | null };
+  if (!Array.isArray(hours) || hours.length !== 7) return { openNow: null, temporarilyClosed: false, todayHours: null, opensAt: null };
+  const { day, min } = shopClock(now);
+  const today = hours[day];
+  const y = hours[(day + 6) % 7];
+  // Still open from yesterday's late hours?
+  const fromYesterday = !!y && minutes(y.close) < minutes(y.open) && min < minutes(y.close);
+  const openNow = openOn(today, min) || fromYesterday;
+  let opensAt: string | null = null;
+  if (!openNow) {
+    if (today && minutes(today.open) > min) opensAt = today.open;
+    else {
+      for (let k = 1; k <= 7 && !opensAt; k++) {
+        const d = hours[(day + k) % 7];
+        if (d) opensAt = `${DAY_KEYS[(day + k) % 7]} ${d.open}`;
+      }
+    }
+  }
+  return { openNow, temporarilyClosed: false, todayHours: today ?? null, opensAt };
 }
 
 /** Offer columns; expects o = offers, b = businesses. */

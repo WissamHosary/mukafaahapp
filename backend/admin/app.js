@@ -898,10 +898,13 @@
         <label class="f"><span>Category</span><select class="in" name="category" ${shopRole ? 'disabled' : ''}>${S.categories.length ? S.categories.map((c) => opt(c.key, c.nameEn, shop.category)).join('') : opt(shop.category, shop.category, shop.category)}</select></label>
         <label class="f"><span>City</span><input class="in" name="city" maxlength="60" value="${esc(shop.city || '')}"></label>
         <label class="f"><span>Area / street</span><input class="in" name="address" maxlength="160" value="${esc(shop.address || '')}"></label>
-        <label class="f"><span>Opening hours</span><input class="in" name="hours" maxlength="120" value="${esc(shop.hours || '')}" placeholder="Every day 8:00 to 23:00"></label>
         <label class="f"><span>Shop phone</span><input class="in" name="phone" value="${esc(shop.phone || '')}" placeholder="+961 1 234 567"><em>Customers can call it from the shop page.</em></label>
       </div>
       <label class="f"><span>About the shop</span><textarea class="in" name="description" maxlength="600">${esc(shop.description || '')}</textarea></label>
+
+      <div class="fsec">Opening hours <small class="faint">The app shows Open now or Closed from these</small></div>
+      ${hoursEditor(shop.openingHours)}
+      <label class="f mt16"><span>Note on hours (optional)</span><input class="in" name="hours" maxlength="120" value="${esc(shop.hours || '')}" placeholder="e.g. Kitchen closes 30 minutes earlier"></label>
 
       <div class="fsec">Social links <small class="faint">Shown as buttons on the shop page</small></div>
       <div class="fgrid">
@@ -928,6 +931,7 @@
       <div class="optcard">
         <div class="swrow">${toggle('listed', shop.listed !== false)}<div class="t"><b>Visible in the customer app</b><small>Turn off to hide the shop without deleting anything.</small></div></div>
         <div class="swrow">${toggle('allowTransfer', !!shop.allowTransfer)}<div class="t"><b>Customers can send these points to friends</b></div></div>
+        <div class="swrow">${toggle('temporarilyClosed', !!shop.temporarilyClosed)}<div class="t"><b>Temporarily closed</b><small>Shows Closed in the app whatever the hours say, for holidays or repairs.</small></div></div>
       </div>
       <div class="fsec">Loyalty</div>
       <div class="fgrid">
@@ -946,6 +950,7 @@
     f.elements.loc.oninput = () => { const ll = parseLatLng(f.elements.loc.value); if (ll) { pin = ll; map.set(ll); setLink(); } };
     $('#mpClear', f).onclick = () => { pin = null; f.elements.loc.value = ''; map.set(null); setLink(); };
     wsBanners($('#bn', ws), shop);
+    wireHours(f);
     f.onsubmit = async (e) => {
       e.preventDefault();
       if (val(f, 'loc') && !parseLatLng(val(f, 'loc'))) { toast('Couldn’t read that location.', true); return; }
@@ -959,6 +964,7 @@
           whatsapp: orNull(val(f, 'whatsapp')), instagram: handle('instagram'), facebook: orNull(val(f, 'facebook')), tiktok: handle('tiktok'),
           website: orNull(web), phone: orNull(val(f, 'phone')), hours: orNull(val(f, 'hours')), description: orNull(val(f, 'description')),
           lat: pin ? pin[0] : null, lng: pin ? pin[1] : null, listed: f.elements.listed.checked, allowTransfer: f.elements.allowTransfer.checked,
+          openingHours: readHours(f), temporarilyClosed: f.elements.temporarilyClosed.checked,
         };
         if (!shopRole) prof.category = val(f, 'category');
         await api('PATCH', `${base(shop)}/profile`, prof);
@@ -970,6 +976,32 @@
         reloadTab();
       } catch (err) { fail(err); } finally { btn.disabled = false; }
     };
+  }
+
+  // ---------- Weekly opening hours ----------
+  const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  /** 7 rows, Monday first. A day that is off is closed; same open and close time means 24 hours. */
+  function hoursEditor(hours) {
+    const h = Array.isArray(hours) && hours.length === 7 ? hours : null;
+    return `<div class="hrs" id="hrs" data-set="${h ? 1 : 0}">${DAYS.map((d, i) => {
+      const x = h ? h[i] : { open: '09:00', close: '22:00' };
+      const on = !!x;
+      return `<div class="hr ${on ? '' : 'off'}" data-day="${i}"><b>${d}</b>${toggle(`hon${i}`, on, `aria-label="Open on ${d}"`)}
+        <span class="hr-t"><input class="in" type="time" name="hfrom${i}" value="${esc(x?.open || '09:00')}" aria-label="${d} opens"><i>to</i><input class="in" type="time" name="hto${i}" value="${esc(x?.close || '22:00')}" aria-label="${d} closes"></span>
+        <span class="hr-off">Closed</span></div>`;
+    }).join('')}
+      <div class="hr-foot"><button type="button" class="btn ghost sm" id="hrCopy">${ic('copy', 'sm')} Copy Monday to every day</button><button type="button" class="btn ghost sm" id="hrClear">${ic('trash', 'sm')} No fixed hours</button><span class="faint" id="hrNote">${h ? '' : 'Not set yet: the app won’t show Open or Closed until you save hours.'}</span></div></div>`;
+  }
+  function wireHours(f) {
+    const box = $('#hrs', f);
+    $$('.hr', box).forEach((row) => { const i = row.dataset.day; f.elements[`hon${i}`].onchange = (e) => { row.classList.toggle('off', !e.target.checked); box.dataset.set = 1; $('#hrNote', box).textContent = ''; }; });
+    $$('input[type=time]', box).forEach((x) => (x.oninput = () => { box.dataset.set = 1; $('#hrNote', box).textContent = ''; }));
+    $('#hrCopy', box).onclick = () => { for (let i = 1; i < 7; i++) { f.elements[`hfrom${i}`].value = f.elements.hfrom0.value; f.elements[`hto${i}`].value = f.elements.hto0.value; f.elements[`hon${i}`].checked = f.elements.hon0.checked; $(`.hr[data-day="${i}"]`, box).classList.toggle('off', !f.elements.hon0.checked); } box.dataset.set = 1; $('#hrNote', box).textContent = ''; };
+    $('#hrClear', box).onclick = () => { box.dataset.set = 0; $('#hrNote', box).textContent = 'No fixed hours: the app won’t show Open or Closed.'; };
+  }
+  function readHours(f) {
+    if ($('#hrs', f).dataset.set !== '1') return null;
+    return DAYS.map((_, i) => (f.elements[`hon${i}`].checked ? { open: f.elements[`hfrom${i}`].value || '09:00', close: f.elements[`hto${i}`].value || '22:00' } : null));
   }
 
   /** Banners: pictures that slide at the top of the shop page in the app. */
@@ -1201,16 +1233,23 @@
       <div class="card"><div class="swrow" style="padding:0">${toggle('enabled', st.enabled, 'id="storeOn" aria-label="Online store"')}<div class="t"><b>Online store ${st.enabled ? '<span class="pill ok">Open</span>' : '<span class="pill">Off</span>'}</b><small>Customers browse products with sizes and colours and send the order to the shop’s WhatsApp. No online payment.</small></div></div>
         ${st.enabled && !st.hasWhatsapp ? `<div class="alert warn mt16">${ic('alert', 'sm')}<div>Add a WhatsApp number in Profile so orders can be sent.</div></div>` : ''}</div>
       <div class="card"><div class="card-h"><h3>Categories</h3><span class="sp"></span><button class="btn ghost sm" id="addCat">${ic('plus', 'sm')} Category</button></div>
-        <div class="chips">${st.categories.map((c) => `<button class="chip" data-cat="${esc(c.id)}">${esc(c.name)} <span class="n">${num(c.products)}</span></button>`).join('') || '<span class="muted">No categories yet.</span>'}</div></div>
+        <div class="chips">${st.categories.map((c) => `<button class="chip catchip" data-cat="${esc(c.id)}">${c.imageUrl ? `<img src="${esc(c.imageUrl)}" alt="">` : ''}${esc(c.name)} <span class="n">${num(c.products)}</span></button>`).join('') || '<span class="muted">No categories yet.</span>'}</div></div>
       <div class="ph-row mt24" style="margin-bottom:16px"><div class="tt"><h1 style="font-size:17px">Products (${st.products.length})</h1></div><div class="acts"><button class="btn" id="addProd">${ic('plus', 'sm')} New product</button></div></div>
       ${st.products.length ? `<div class="pgrid">${st.products.map((p) => `<button class="pcard" data-id="${esc(p.id)}"><div class="pimg">${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="">` : ic('image', 'lg')}${p.inStock === false ? '<em>Sold out</em>' : p.available === false ? '<em>Hidden</em>' : ''}</div>
         <div class="pb"><b>${esc(p.name)}</b><small>${p.hasVariants ? p.options.map((o) => `${o.values.length} ${esc(o.name.toLowerCase())}`).join(' · ') : (p.trackStock ? `${num(p.stock ?? 0)} in stock` : 'No options')}</small>
         <div class="pr">${p.maxPriceMinor > p.priceMinor ? `${usd(p.priceMinor)} – ${usd(p.maxPriceMinor)}` : usd(p.priceMinor)}${p.compareAtMinor ? `<s>${usd(p.compareAtMinor)}</s>` : ''}</div></div></button>`).join('')}</div>` : `<div class="card">${empty('bag', 'No products yet', 'Add the first product. Sizes and colours become variants with their own price and stock.')}</div>`}`;
     $('#storeOn', ws).onchange = async (e) => { try { await api('PUT', `${base(shop)}/store`, { enabled: e.target.checked }); toast(e.target.checked ? 'Store is open' : 'Store is off'); reloadTab(); } catch (err) { fail(err); e.target.checked = !e.target.checked; } };
-    $('#addCat', ws).onclick = () => modal('New category', '<label class="f"><span>Name</span><input class="in" name="name" maxlength="40" placeholder="e.g. T-shirts"></label>', async (f) => { await api('POST', `${base(shop)}/store/categories`, { name: val(f, 'name') }); reloadTab(); }, { save: 'Add', size: 'sm' });
+    const catForm = (c) => `<label class="f"><span>Name</span><input class="in" name="name" maxlength="40" value="${esc(c?.name || '')}" placeholder="e.g. T-shirts"></label>${dropHtml('imageId', c?.imageUrl, 'Picture', 'Square photo for the category tile')}`;
+    $('#addCat', ws).onclick = () => {
+      const f = modal('New category', catForm(null), async (form) => { const body = { name: val(form, 'name') }; if (val(form, 'imageId')) body.imageId = val(form, 'imageId'); await api('POST', `${base(shop)}/store/categories`, body); reloadTab(); }, { save: 'Add', size: 'sm' });
+      wireDrop(f, 'imageId', 900, { path: `${base(shop)}/media`, purpose: 'item' });
+    };
     $$('[data-cat]', ws).forEach((b) => (b.onclick = () => {
       const c = st.categories.find((x) => x.id === b.dataset.cat);
-      const f = modal('Edit category', `<label class="f"><span>Name</span><input class="in" name="name" maxlength="40" value="${esc(c.name)}"></label><button type="button" class="btn danger sm" id="delCat">${ic('trash', 'sm')} Delete category</button>`, async (form) => { await api('PATCH', `${base(shop)}/store/categories/${c.id}`, { name: val(form, 'name') }); reloadTab(); }, { size: 'sm' });
+      const f = modal('Edit category', `${catForm(c)}<button type="button" class="btn danger sm" id="delCat">${ic('trash', 'sm')} Delete category</button>`, async (form) => {
+        const body = { name: val(form, 'name') }; const img = val(form, 'imageId'); if (img) body.imageId = img; else if (dropCleared(form, 'imageId')) body.imageId = null;
+        await api('PATCH', `${base(shop)}/store/categories/${c.id}`, body); reloadTab(); }, { size: 'sm' });
+      wireDrop(f, 'imageId', 900, { path: `${base(shop)}/media`, purpose: 'item' });
       $('#delCat', f).onclick = async () => { try { await api('DELETE', `${base(shop)}/store/categories/${c.id}`); f.close(); reloadTab(); } catch (err) { fail(err); } };
     }));
     $('#addProd', ws).onclick = () => editProduct(shop, st, null);

@@ -28,6 +28,13 @@ const zProfile = z.strictObject({
   website: z.string().trim().max(200).regex(/^https?:\/\/\S+$/, 'Start the website with https://').nullable().optional(),
   phone: z.string().trim().regex(/^\+?[0-9 ]{7,20}$/).nullable().optional(),
   hours: z.string().trim().max(120).nullable().optional(),
+  /** 7 days, Monday first: null = closed that day. */
+  openingHours: z
+    .array(z.strictObject({ open: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), close: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).nullable())
+    .length(7)
+    .nullable()
+    .optional(),
+  temporarilyClosed: z.boolean().optional(),
 });
 const zBanner = z.strictObject({ dataBase64: z.string().min(20).max(4_500_000), caption: z.string().trim().max(80).nullable().optional() });
 const zBannerOrder = z.strictObject({ ids: z.array(zUuid).max(10) });
@@ -133,6 +140,8 @@ export class MerchantController {
       website: b.website ?? null,
       phone: b.phone ?? null,
       hours: b.hours ?? null,
+      openingHours: b.opening_hours ?? null,
+      temporarilyClosed: !!b.temporarily_closed,
       banners: (
         await this.db.query(`SELECT id, media_id, caption FROM business_banners WHERE business_id = $1 ORDER BY sort, created_at`, [b.id])
       ).rows.map((x) => ({ id: x.id, url: mediaUrl(x.media_id), caption: x.caption ?? null })),
@@ -168,6 +177,8 @@ export class MerchantController {
           website: b.website,
           phone: b.phone,
           hours: b.hours,
+          opening_hours: b.openingHours === undefined ? undefined : b.openingHours === null ? null : JSON.stringify(b.openingHours),
+          temporarily_closed: b.temporarilyClosed,
         },
         2,
       );
