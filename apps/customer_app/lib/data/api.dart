@@ -519,10 +519,39 @@ class StoreProduct {
   }
 }
 
+/// How a shop hands store orders over (set in Mukafaah Manager).
+class StoreFulfilment {
+  const StoreFulfilment({this.pickup = true, this.delivery = true, this.deliveryFeeMinor = 0, this.freeDeliveryOverMinor, this.minOrderMinor = 0, this.note});
+  factory StoreFulfilment.fromJson(Json? j) => j == null
+      ? const StoreFulfilment()
+      : StoreFulfilment(
+          pickup: j['pickup'] != false,
+          delivery: j['delivery'] != false,
+          deliveryFeeMinor: _i(j['deliveryFeeMinor']),
+          freeDeliveryOverMinor: j['freeDeliveryOverMinor'] == null ? null : _i(j['freeDeliveryOverMinor']),
+          minOrderMinor: _i(j['minOrderMinor']),
+          note: _s(j['note']),
+        );
+  final bool pickup;
+  final bool delivery;
+  final int deliveryFeeMinor;
+
+  /// Delivery is free from this order amount up.
+  final int? freeDeliveryOverMinor;
+  final int minOrderMinor;
+
+  /// For example "Beirut only, 30 to 45 minutes".
+  final String? note;
+
+  int feeFor(int subtotal) => freeDeliveryOverMinor != null && subtotal >= freeDeliveryOverMinor! ? 0 : deliveryFeeMinor;
+}
+
 class StoreData {
-  const StoreData({required this.shopName, required this.canOrder, required this.categories, required this.products});
+  const StoreData({required this.shopName, required this.canOrder, required this.categories, required this.products, this.logoUrl, this.fulfilment = const StoreFulfilment()});
   factory StoreData.fromJson(Json j) => StoreData(
         shopName: (j['shopName'] ?? '') as String,
+        logoUrl: _s(j['logoUrl']),
+        fulfilment: StoreFulfilment.fromJson((j['fulfilment'] as Map?)?.cast<String, dynamic>()),
         canOrder: j['canOrder'] == true,
         categories: ((j['categories'] as List?) ?? const [])
             .map((e) => (id: (e as Map)['id'] as String, name: e['name'] as String, imageUrl: _s(e['imageUrl'])))
@@ -530,6 +559,8 @@ class StoreData {
         products: ((j['products'] as List?) ?? const []).map((e) => StoreProduct.fromJson(e as Json)).toList(),
       );
   final String shopName;
+  final String? logoUrl;
+  final StoreFulfilment fulfilment;
   final bool canOrder;
   final List<({String id, String name, String? imageUrl})> categories;
   final List<StoreProduct> products;

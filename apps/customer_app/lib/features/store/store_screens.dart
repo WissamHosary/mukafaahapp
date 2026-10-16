@@ -551,6 +551,7 @@ class _ProductScreenState extends ConsumerState<ProductScreen> {
   final _pages = PageController();
   int _page = 0;
   int _qty = 1;
+  bool _more = false;
   List<String?>? _chosen;
 
   @override
@@ -569,6 +570,10 @@ class _ProductScreenState extends ConsumerState<ProductScreen> {
       }
       return true;
     });
+  }
+
+  void _goTo(int i) {
+    if (_pages.hasClients) _pages.animateToPage(i, duration: MkMotion.slow, curve: MkMotion.standard);
   }
 
   @override
@@ -602,49 +607,82 @@ class _ProductScreenState extends ConsumerState<ProductScreen> {
           if (variant?.imageUrl != null && !p.imageUrls.contains(variant!.imageUrl)) variant.imageUrl!,
         ];
         final canOrder = store?.canOrder ?? true;
+        final ful = store?.fulfilment ?? const StoreFulfilment();
+        final sale = _saleText(price, compareAt);
+        final firstMissing = missing ? chosen.indexOf(null) : -1;
+        final w = MediaQuery.sizeOf(context).width;
 
         return Scaffold(
+          backgroundColor: MkColors.surface,
           bottomNavigationBar: SafeArea(
             child: Container(
               padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.sm, MkSpace.lg, MkSpace.sm),
               decoration: const BoxDecoration(
                 color: MkColors.surface,
-                boxShadow: [BoxShadow(color: Color(0x142C123F), blurRadius: 20, offset: Offset(0, -4))],
+                border: Border(top: BorderSide(color: MkColors.line)),
               ),
               child: Row(
                 children: [
-                  MkQtyStepper(value: _qty, max: stock, onChanged: (v) => setState(() => _qty = v)),
-                  const SizedBox(width: MkSpace.sm),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(s.tr('المجموع', 'Total'), style: t.labelSmall?.copyWith(color: MkColors.ink3)),
+                      AnimatedSwitcher(
+                        duration: MkMotion.fast,
+                        child: Text(
+                          missing && p.maxPriceMinor > p.priceMinor ? _priceText(s, p) : money(price * _qty),
+                          key: ValueKey('$price$_qty$missing'),
+                          style: t.titleLarge?.copyWith(fontWeight: FontWeight.w900, color: MkColors.purple900),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: MkSpace.md),
                   Expanded(
-                    child: MkButton(
-                      label: !inStock
-                          ? s.tr('خلصت الكمية', 'Sold out')
-                          : missing
-                              ? s.tr('اختار ${p.options[chosen.indexOf(null)].name}', 'Choose ${p.options[chosen.indexOf(null)].name}')
-                              : s.tr('أضف · ${money(price * _qty)}', 'Add · ${money(price * _qty)}'),
-                      icon: Icons.shopping_bag_rounded,
-                      kind: MkButtonKind.accent,
-                      onPressed: !inStock || missing || !canOrder
-                          ? null
-                          : () {
-                              final ok = _addToCart(
-                                context,
-                                ref,
-                                widget.shopId,
-                                store?.shopName ?? '',
-                                CartLine(
-                                  productId: p.id,
-                                  variantId: variant?.id,
-                                  name: p.name,
-                                  variantLabel: variant?.label,
-                                  priceMinor: price,
-                                  qty: _qty,
-                                  imageUrl: variant?.imageUrl ?? p.imageUrl,
-                                  maxQty: stock,
-                                ),
-                              );
-                              if (ok) setState(() => _qty = 1);
-                            },
+                    child: SizedBox(
+                      height: 54,
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: MkColors.purple900,
+                          foregroundColor: MkColors.yellow500,
+                          disabledBackgroundColor: MkColors.purple100,
+                          disabledForegroundColor: MkColors.ink3,
+                          shape: RoundedRectangleBorder(borderRadius: MkRadius.all(18)),
+                          textStyle: t.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        onPressed: !inStock || missing || !canOrder
+                            ? null
+                            : () {
+                                final ok = _addToCart(
+                                  context,
+                                  ref,
+                                  widget.shopId,
+                                  store?.shopName ?? '',
+                                  CartLine(
+                                    productId: p.id,
+                                    variantId: variant?.id,
+                                    name: p.name,
+                                    variantLabel: variant?.label,
+                                    priceMinor: price,
+                                    qty: _qty,
+                                    imageUrl: variant?.imageUrl ?? p.imageUrl,
+                                    maxQty: stock,
+                                  ),
+                                );
+                                if (ok) setState(() => _qty = 1);
+                              },
+                        icon: Icon(!inStock ? Icons.block_rounded : (missing ? Icons.touch_app_rounded : Icons.add_shopping_cart_rounded)),
+                        label: Text(
+                          !canOrder
+                              ? s.tr('الطلب مسكّر', 'Ordering is off')
+                              : !inStock
+                                  ? s.tr('خلصت الكمية', 'Sold out')
+                                  : missing
+                                      ? s.tr('اختار ${p.options[firstMissing].name}', 'Choose ${p.options[firstMissing].name.toLowerCase()}')
+                                      : s.tr('أضف للسلة', 'Add to cart'),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -655,49 +693,88 @@ class _ProductScreenState extends ConsumerState<ProductScreen> {
             slivers: [
               SliverAppBar(
                 pinned: true,
-                expandedHeight: MediaQuery.sizeOf(context).width.clamp(280.0, 460.0),
+                stretch: true,
+                expandedHeight: w.clamp(280.0, 520.0),
                 backgroundColor: MkColors.surface,
+                surfaceTintColor: Colors.transparent,
                 foregroundColor: MkColors.ink,
-                actions: const [_CartButton(), SizedBox(width: 4)],
+                leading: Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 8),
+                  child: Center(
+                    child: IconButton.filled(
+                      style: IconButton.styleFrom(backgroundColor: Colors.white, foregroundColor: MkColors.ink, elevation: 2),
+                      tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+                      onPressed: () => context.pop(),
+                      icon: const Icon(Icons.arrow_back_rounded),
+                    ),
+                  ),
+                ),
+                actions: [
+                  Container(
+                    margin: const EdgeInsetsDirectional.only(end: 8),
+                    decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Color(0x262C123F), blurRadius: 8)]),
+                    child: const _CartButton(),
+                  ),
+                ],
                 flexibleSpace: FlexibleSpaceBar(
-                  background: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (images.isEmpty)
-                        const MkNetImage(url: null, fallbackIcon: Icons.shopping_bag_rounded)
-                      else
-                        PageView.builder(
-                          controller: _pages,
-                          itemCount: images.length,
-                          onPageChanged: (i) => setState(() => _page = i),
-                          itemBuilder: (context, i) => i == 0
-                              ? Hero(tag: 'p-${p.id}', child: MkNetImage(url: url(images[i]), cacheWidth: 1080))
-                              : MkNetImage(url: url(images[i]), cacheWidth: 1080),
-                        ),
-                      if (images.length > 1)
-                        Positioned(
-                          bottom: 14,
-                          left: 0,
-                          right: 0,
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              for (var i = 0; i < images.length; i++)
-                                AnimatedContainer(
-                                  duration: MkMotion.base,
-                                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                                  width: i == _page ? 20 : 7,
-                                  height: 7,
-                                  decoration: BoxDecoration(
-                                    color: i == _page ? MkColors.purple900 : Colors.white.withValues(alpha: 0.8),
-                                    borderRadius: MkRadius.all(MkRadius.pill),
-                                    boxShadow: MkShadow.soft,
-                                  ),
-                                ),
-                            ],
+                  stretchModes: const [StretchMode.zoomBackground],
+                  background: ColoredBox(
+                    color: const Color(0xFFF4F1F7),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (images.isEmpty)
+                          const Center(child: Icon(Icons.shopping_bag_outlined, size: 72, color: MkColors.purple100))
+                        else
+                          PageView.builder(
+                            controller: _pages,
+                            itemCount: images.length,
+                            onPageChanged: (i) => setState(() => _page = i),
+                            itemBuilder: (context, i) => i == 0
+                                ? Hero(tag: 'p-${p.id}', child: MkNetImage(url: url(images[i]), cacheWidth: 1080))
+                                : MkNetImage(url: url(images[i]), cacheWidth: 1080),
                           ),
-                        ),
-                    ],
+                        if (sale != null && inStock)
+                          PositionedDirectional(
+                            start: MkSpace.lg,
+                            bottom: images.length > 1 ? 76 : 18,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(color: MkColors.danger, borderRadius: MkRadius.all(MkRadius.pill)),
+                              child: Text(sale, style: t.labelLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
+                            ),
+                          ),
+                        // Thumbnails of every photo; the chosen one is outlined.
+                        if (images.length > 1)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 12,
+                            height: 54,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(horizontal: MkSpace.lg),
+                              itemCount: images.length,
+                              separatorBuilder: (context, i) => const SizedBox(width: 8),
+                              itemBuilder: (context, i) => GestureDetector(
+                                onTap: () => _goTo(i),
+                                child: AnimatedContainer(
+                                  duration: MkMotion.fast,
+                                  width: 54,
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: MkRadius.all(12),
+                                    border: Border.all(color: i == _page ? MkColors.purple900 : Colors.white, width: 2),
+                                    boxShadow: const [BoxShadow(color: Color(0x262C123F), blurRadius: 8)],
+                                  ),
+                                  child: MkNetImage(url: url(images[i]), radius: 9, cacheWidth: 160),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -705,25 +782,32 @@ class _ProductScreenState extends ConsumerState<ProductScreen> {
                 padding: const EdgeInsets.fromLTRB(MkSpace.lg, MkSpace.lg, MkSpace.lg, MkSpace.xxl),
                 sliver: SliverList.list(
                   children: [
-                    Text(p.name, style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                    if (store != null)
+                      Row(
+                        children: [
+                          SizedBox(width: 22, height: 22, child: ClipOval(child: MkNetImage(url: url(store.logoUrl), fallbackName: store.shopName, cacheWidth: 66))),
+                          const SizedBox(width: 6),
+                          Text(store.shopName, style: t.labelLarge?.copyWith(color: MkColors.purple700, fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    const SizedBox(height: 6),
+                    Text(p.name, style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w800, height: 1.2)),
                     const SizedBox(height: MkSpace.xs),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
                       children: [
-                        MkPrice(
-                          price: missing && p.maxPriceMinor > p.priceMinor ? _priceText(s, p) : money(price),
-                          oldPrice: compareAt != null && compareAt > price ? money(compareAt) : null,
-                          large: true,
+                        Text(
+                          missing && p.maxPriceMinor > p.priceMinor ? _priceText(s, p) : money(price),
+                          style: t.headlineSmall?.copyWith(fontWeight: FontWeight.w900, color: MkColors.purple900),
                         ),
-                        const SizedBox(width: MkSpace.xs),
-                        if (_saleText(price, compareAt) case final sale?)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(color: MkColors.dangerBg, borderRadius: MkRadius.all(MkRadius.pill)),
-                            child: Text(sale, style: t.labelMedium?.copyWith(color: MkColors.danger, fontWeight: FontWeight.w800)),
-                          ),
+                        if (compareAt != null && compareAt > price) ...[
+                          const SizedBox(width: 8),
+                          Text(money(compareAt), style: t.titleSmall?.copyWith(color: MkColors.ink3, decoration: TextDecoration.lineThrough)),
+                        ],
                       ],
                     ),
-                    const SizedBox(height: MkSpace.xs),
+                    const SizedBox(height: 6),
                     _StockLine(inStock: inStock, stock: stock, missing: missing),
                     for (var i = 0; i < p.options.length; i++) ...[
                       const SizedBox(height: MkSpace.lg),
@@ -734,41 +818,57 @@ class _ProductScreenState extends ConsumerState<ProductScreen> {
                         isAvailable: (v) => _available(p, i, v),
                         onSelect: (v) => setState(() {
                           chosen[i] = chosen[i] == v ? null : v;
+                          // A choice that clashes with another clears the other one.
+                          for (var k = 0; k < chosen.length; k++) {
+                            if (k != i && chosen[k] != null && !_available(p, k, chosen[k]!)) chosen[k] = null;
+                          }
                           _qty = 1;
                           // Show the variant's own photo when it has one.
-                          final nv = p.variantFor(chosen);
-                          if (nv?.imageUrl != null && _pages.hasClients) {
-                            final idx = images.indexOf(nv!.imageUrl!);
-                            if (idx >= 0) _pages.animateToPage(idx, duration: MkMotion.slow, curve: MkMotion.standard);
+                          final img = p.variantFor(chosen)?.imageUrl;
+                          if (img != null) {
+                            final all = [...p.imageUrls, if (!p.imageUrls.contains(img)) img];
+                            final idx = all.indexOf(img);
+                            if (idx >= 0) WidgetsBinding.instance.addPostFrameCallback((_) => _goTo(idx));
                           }
                         }),
                       ),
                     ],
-                    if ((p.description ?? '').isNotEmpty) ...[
-                      const SizedBox(height: MkSpace.xl),
-                      Text(s.tr('الوصف', 'Description'), style: t.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                      const SizedBox(height: MkSpace.xs),
-                      Text(p.description!, style: t.bodyMedium?.copyWith(color: MkColors.ink2, height: 1.5)),
-                    ],
-                    const SizedBox(height: MkSpace.xl),
-                    MkCard(
-                      color: MkColors.purple50,
-                      child: Row(
-                        children: [
-                          const Icon(Icons.chat_rounded, color: MkColors.purple700),
-                          const SizedBox(width: MkSpace.sm),
-                          Expanded(
-                            child: Text(
-                              s.tr(
-                                'الطلب بينبعت للمحل عالواتساب. الدفع عند الاستلام أو التوصيل.',
-                                'Your order goes to the shop on WhatsApp. Pay on pickup or delivery.',
-                              ),
-                              style: t.bodySmall?.copyWith(color: MkColors.ink2),
-                            ),
-                          ),
-                        ],
-                      ),
+                    const SizedBox(height: MkSpace.lg),
+                    Row(
+                      children: [
+                        Text(s.tr('الكمية', 'Quantity'), style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+                        const Spacer(),
+                        MkQtyStepper(value: _qty, max: stock, onChanged: (v) => setState(() => _qty = v)),
+                      ],
                     ),
+                    if ((p.description ?? '').isNotEmpty) ...[
+                      const SizedBox(height: MkSpace.lg),
+                      const Divider(height: 1),
+                      const SizedBox(height: MkSpace.md),
+                      Text(s.tr('التفاصيل', 'Details'), style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: MkSpace.xs),
+                      AnimatedSize(
+                        duration: MkMotion.base,
+                        alignment: Alignment.topCenter,
+                        child: Text(
+                          p.description!,
+                          maxLines: _more ? null : 4,
+                          overflow: _more ? null : TextOverflow.fade,
+                          style: t.bodyMedium?.copyWith(color: MkColors.ink2, height: 1.55),
+                        ),
+                      ),
+                      if (p.description!.length > 180)
+                        Align(
+                          alignment: AlignmentDirectional.centerStart,
+                          child: TextButton(
+                            style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+                            onPressed: () => setState(() => _more = !_more),
+                            child: Text(_more ? s.tr('أقل', 'Show less') : s.tr('اقرأ أكتر', 'Read more')),
+                          ),
+                        ),
+                    ],
+                    const SizedBox(height: MkSpace.lg),
+                    _ServiceCard(ful: ful),
                   ],
                 ),
               ),
@@ -776,6 +876,58 @@ class _ProductScreenState extends ConsumerState<ProductScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Delivery, pickup and payment, as the shop set them up.
+class _ServiceCard extends ConsumerWidget {
+  const _ServiceCard({required this.ful});
+  final StoreFulfilment ful;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(stringsProvider);
+    final t = Theme.of(context).textTheme;
+    final rows = <(IconData, String, String)>[
+      if (ful.delivery)
+        (
+          Icons.delivery_dining_rounded,
+          ful.deliveryFeeMinor == 0 ? s.tr('توصيل مجاني', 'Free delivery') : s.tr('توصيل ${money(ful.deliveryFeeMinor)}', 'Delivery ${money(ful.deliveryFeeMinor)}'),
+          [
+            if (ful.freeDeliveryOverMinor != null && ful.deliveryFeeMinor > 0) s.tr('مجاني فوق ${money(ful.freeDeliveryOverMinor!)}', 'Free over ${money(ful.freeDeliveryOverMinor!)}'),
+            if (ful.note != null) ful.note!,
+          ].join(' · '),
+        ),
+      if (ful.pickup) (Icons.storefront_rounded, s.tr('استلام من المحل', 'Pickup from the shop'), s.tr('بلا رسوم', 'No fee')),
+      (Icons.payments_outlined, s.tr('الدفع عند الاستلام', 'Pay on delivery or pickup'), s.tr('الطلب بيروح للمحل عالواتساب', 'Your order goes to the shop on WhatsApp')),
+    ];
+    return Container(
+      decoration: BoxDecoration(color: MkColors.purple50, borderRadius: MkRadius.all(MkRadius.lg)),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        children: [
+          for (final r in rows)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              child: Row(
+                children: [
+                  Icon(r.$1, color: MkColors.purple700, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(r.$2, style: t.labelLarge?.copyWith(fontWeight: FontWeight.w800)),
+                        if (r.$3.isNotEmpty) Text(r.$3, style: t.labelSmall?.copyWith(color: MkColors.ink3)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -927,6 +1079,16 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final t = Theme.of(context).textTheme;
     final url = ref.watch(mediaUrlProvider);
     final cart = ref.watch(cartProvider);
+    final store = cart.shopId == null ? null : ref.watch(shopStoreProvider(cart.shopId!)).value;
+    final ful = store?.fulfilment ?? const StoreFulfilment();
+    // Only what the shop offers: delivery, pickup or both.
+    final canDeliver = ful.delivery || !ful.pickup;
+    if (_delivery && !canDeliver) _delivery = false;
+    if (!_delivery && !ful.pickup) _delivery = true;
+    final subtotal = cart.totalMinor;
+    final fee = _delivery ? ful.feeFor(subtotal) : 0;
+    final total = subtotal + fee;
+    final belowMin = ful.minOrderMinor > 0 && subtotal < ful.minOrderMinor;
 
     Widget field(TextEditingController c, String label, IconData icon, {TextInputType? type, int max = 120, String? hint}) => Padding(
           padding: const EdgeInsets.only(bottom: MkSpace.sm),
@@ -949,7 +1111,15 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (!_ready)
+                    if (belowMin)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(
+                          s.tr('أقل طلب ${money(ful.minOrderMinor)}. زيد ${money(ful.minOrderMinor - subtotal)}.', 'Minimum order is ${money(ful.minOrderMinor)}. Add ${money(ful.minOrderMinor - subtotal)} more.'),
+                          style: t.labelSmall?.copyWith(color: MkColors.danger, fontWeight: FontWeight.w700),
+                        ),
+                      )
+                    else if (!_ready)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Text(
@@ -958,9 +1128,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                         ),
                       ),
                     _WhatsAppButton(
-                      label: s.tr('ابعت على واتساب · ${money(cart.totalMinor)}', 'Send to WhatsApp · ${money(cart.totalMinor)}'),
+                      label: s.tr('ابعت على واتساب · ${money(total)}', 'Send to WhatsApp · ${money(total)}'),
                       busy: _busy,
-                      onTap: _ready ? _send : null,
+                      onTap: _ready && !belowMin ? _send : null,
                     ),
                   ],
                 ),
@@ -1023,27 +1193,41 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 _Step(n: 1, title: s.tr('كيف بدك تستلم؟', 'How do you want it?')),
                 Row(
                   children: [
-                    Expanded(
-                      child: _Choice(
-                        on: _delivery,
-                        icon: Icons.delivery_dining_rounded,
-                        title: s.tr('توصيل', 'Delivery'),
-                        sub: s.tr('لعندك', 'To your door'),
-                        onTap: () => setState(() => _delivery = true),
+                    if (canDeliver)
+                      Expanded(
+                        child: _Choice(
+                          on: _delivery,
+                          icon: Icons.delivery_dining_rounded,
+                          title: s.tr('توصيل', 'Delivery'),
+                          sub: ful.feeFor(subtotal) == 0 ? s.tr('مجاني', 'Free') : money(ful.feeFor(subtotal)),
+                          onTap: () => setState(() => _delivery = true),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: MkSpace.sm),
-                    Expanded(
-                      child: _Choice(
-                        on: !_delivery,
-                        icon: Icons.storefront_rounded,
-                        title: s.tr('استلام', 'Pickup'),
-                        sub: s.tr('من المحل', 'From the shop'),
-                        onTap: () => setState(() => _delivery = false),
+                    if (canDeliver && ful.pickup) const SizedBox(width: MkSpace.sm),
+                    if (ful.pickup)
+                      Expanded(
+                        child: _Choice(
+                          on: !_delivery,
+                          icon: Icons.storefront_rounded,
+                          title: s.tr('استلام', 'Pickup'),
+                          sub: s.tr('من المحل، بلا رسوم', 'From the shop, no fee'),
+                          onTap: () => setState(() => _delivery = false),
+                        ),
                       ),
-                    ),
                   ],
                 ),
+                if (_delivery && (ful.note != null || (ful.freeDeliveryOverMinor != null && fee > 0)))
+                  Padding(
+                    padding: const EdgeInsets.only(top: MkSpace.xs),
+                    child: Text(
+                      [
+                        if (ful.freeDeliveryOverMinor != null && fee > 0)
+                          s.tr('التوصيل مجاني فوق ${money(ful.freeDeliveryOverMinor!)}', 'Free delivery over ${money(ful.freeDeliveryOverMinor!)}'),
+                        if (ful.note != null) ful.note!,
+                      ].join(' · '),
+                      style: t.labelMedium?.copyWith(color: MkColors.purple700, fontWeight: FontWeight.w700),
+                    ),
+                  ),
                 const SizedBox(height: MkSpace.lg),
                 _Step(n: 2, title: s.tr('معلوماتك', 'Your details')),
                 field(_name, s.tr('الاسم الكامل', 'Full name'), Icons.person_outline_rounded, max: 60),
@@ -1109,11 +1293,16 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 MkCard(
                   child: Column(
                     children: [
-                      _row(t, s.tr('المنتجات (${cart.count})', 'Items (${cart.count})'), money(cart.totalMinor)),
+                      _row(t, s.tr('المنتجات (${cart.count})', 'Items (${cart.count})'), money(subtotal)),
                       const SizedBox(height: 6),
-                      _row(t, _delivery ? s.tr('التوصيل', 'Delivery') : s.tr('الاستلام', 'Pickup'), s.tr('بيأكده المحل', 'Confirmed by the shop')),
+                      _row(t, _delivery ? s.tr('التوصيل', 'Delivery') : s.tr('الاستلام', 'Pickup'), fee == 0 ? s.tr('مجاني', 'Free') : money(fee)),
                       const Divider(height: MkSpace.lg),
-                      _row(t, s.tr('المجموع', 'Total'), money(cart.totalMinor), bold: true),
+                      _row(t, s.tr('المجموع', 'Total'), money(total), bold: true),
+                      const SizedBox(height: 2),
+                      Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: Text(s.tr('الدفع عند الاستلام', 'Pay on delivery or pickup'), style: t.labelSmall?.copyWith(color: MkColors.ink3)),
+                      ),
                     ],
                   ),
                 ),

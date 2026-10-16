@@ -35,6 +35,13 @@ const zProfile = z.strictObject({
     .nullable()
     .optional(),
   temporarilyClosed: z.boolean().optional(),
+  // Online store hand-over (edited in Mukafaah Manager).
+  storePickup: z.boolean().optional(),
+  storeDelivery: z.boolean().optional(),
+  deliveryFeeMinor: z.number().int().min(0).max(100000).optional(),
+  freeDeliveryOverMinor: z.number().int().min(0).max(10000000).nullable().optional(),
+  minOrderMinor: z.number().int().min(0).max(10000000).optional(),
+  deliveryNote: z.string().trim().max(120).nullable().optional(),
 });
 const zBanner = z.strictObject({ dataBase64: z.string().min(20).max(4_500_000), caption: z.string().trim().max(80).nullable().optional() });
 const zBannerOrder = z.strictObject({ ids: z.array(zUuid).max(10) });
@@ -142,6 +149,12 @@ export class MerchantController {
       hours: b.hours ?? null,
       openingHours: b.opening_hours ?? null,
       temporarilyClosed: !!b.temporarily_closed,
+      storePickup: b.store_pickup !== false,
+      storeDelivery: b.store_delivery !== false,
+      deliveryFeeMinor: Number(b.delivery_fee_minor ?? 0),
+      freeDeliveryOverMinor: b.free_delivery_over_minor == null ? null : Number(b.free_delivery_over_minor),
+      minOrderMinor: Number(b.min_order_minor ?? 0),
+      deliveryNote: b.delivery_note ?? null,
       banners: (
         await this.db.query(`SELECT id, media_id, caption FROM business_banners WHERE business_id = $1 ORDER BY sort, created_at`, [b.id])
       ).rows.map((x) => ({ id: x.id, url: mediaUrl(x.media_id), caption: x.caption ?? null })),
@@ -179,6 +192,12 @@ export class MerchantController {
           hours: b.hours,
           opening_hours: b.openingHours === undefined ? undefined : b.openingHours === null ? null : JSON.stringify(b.openingHours),
           temporarily_closed: b.temporarilyClosed,
+          store_pickup: b.storePickup,
+          store_delivery: b.storeDelivery,
+          delivery_fee_minor: b.deliveryFeeMinor,
+          free_delivery_over_minor: b.freeDeliveryOverMinor,
+          min_order_minor: b.minOrderMinor,
+          delivery_note: b.deliveryNote,
         },
         2,
       );

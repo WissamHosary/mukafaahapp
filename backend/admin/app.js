@@ -457,12 +457,22 @@
           const pop = $('.pop', host); if (!pop) return;
           pop.innerHTML = `<div class="ph2">Activity</div>
             <a class="pi" href="#shops"><span class="ni y">${ic('calendar', 'sm')}</span><span class="t"><b>${num(o.pendingBookings)} booking requests waiting</b><small>Shops accept them in the Business app</small></span></a>
-            <a class="pi" href="#reports"><span class="ni">${ic('bag', 'sm')}</span><span class="t"><b>${num(o.orders30d)} store orders</b><small>Last 30 days</small></span></a>
+            <a class="pi" href="#reports"><span class="ni">${ic('bag', 'sm')}</span><span class="t"><b>${num(o.newOrders || 0)} new store orders</b><small>${num(o.orders30d)} in the last 30 days</small></span></a>
+            ${(o.recentOrders || []).map((r) => `<a class="pi" href="#shop/${esc(r.shopId)}/orders"><span class="ni ${r.status === 'NEW' ? 'y' : ''}">${ic('bag', 'sm')}</span><span class="t"><b>#${esc(r.code)} · ${esc(r.shopName)} · ${usd(r.totalMinor)}</b><small>${esc(r.status === 'NEW' ? 'New, waiting for the shop' : r.status.charAt(0) + r.status.slice(1).toLowerCase())} · ${r.fulfilment === 'DELIVERY' ? 'Delivery' : 'Pickup'} · ${esc(new Date(r.createdAt).toLocaleString())}</small></span></a>`).join('')}
             <a class="pi" href="#customers"><span class="ni g">${ic('userplus', 'sm')}</span><span class="t"><b>${num(o.newUsers7d)} new customers</b><small>Last 7 days</small></span></a>`;
           $('#bdot').hidden = true;
         } catch (err) { fail(err); }
       };
-      api('GET', '/v1/admin/overview').then((o) => { const d = $('#bdot'); if (d) d.hidden = !(o.pendingBookings > 0); }).catch(() => {});
+      // New store orders and booking requests light up the bell (checked every minute).
+      const checkBell = () => api('GET', '/v1/admin/overview').then((o) => {
+        const d = $('#bdot'); if (!d) return;
+        const n = (o.newOrders || 0) + (o.pendingBookings || 0);
+        d.hidden = !(n > 0);
+        if (o.newOrders > (S.lastNewOrders ?? o.newOrders)) toast(`New store order${o.newOrders - S.lastNewOrders > 1 ? 's' : ''} in the app`);
+        S.lastNewOrders = o.newOrders || 0;
+      }).catch(() => {});
+      checkBell();
+      clearInterval(S.bellTimer); S.bellTimer = setInterval(checkBell, 60000);
     }
   }
   function popup(host, html) {

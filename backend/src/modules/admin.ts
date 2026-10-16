@@ -260,7 +260,14 @@ export class AdminController {
          (SELECT COALESCE(SUM(bill_minor), 0) FROM visits WHERE type IN ('EARN','PREPOINT_EARN') AND voided_by_tx_id IS NULL AND created_at > now() - interval '30 days') AS bills_30d,
          (SELECT count(*)::int FROM offers WHERE status = 'ACTIVE' AND NOT hidden_by_admin) AS live_offers,
          (SELECT count(*)::int FROM offer_bookings WHERE status = 'REQUESTED') AS pending_bookings,
-         (SELECT count(*)::int FROM whatsapp_orders WHERE created_at > now() - interval '30 days') AS orders_30d`,
+         (SELECT count(*)::int FROM whatsapp_orders WHERE created_at > now() - interval '30 days') AS orders_30d,
+         (SELECT count(*)::int FROM whatsapp_orders WHERE status = 'NEW') AS new_orders`,
+    );
+    // Store orders waiting for the shop to confirm, newest first (the bell in Manager).
+    const recentOrders = await this.db.query(
+      `SELECT o.id, o.code, o.status, o.total_minor, o.fulfilment, o.created_at, b.id AS shop_id, b.name AS shop_name
+         FROM whatsapp_orders o JOIN businesses b ON b.id = o.business_id
+        ORDER BY o.created_at DESC LIMIT 6`,
     );
     const top = await this.db.query(
       `SELECT b.id, b.name, count(v.*)::int AS visits, COALESCE(SUM(v.bill_minor), 0) AS bills
@@ -278,6 +285,17 @@ export class AdminController {
       liveOffers: r.live_offers,
       pendingBookings: r.pending_bookings,
       orders30d: r.orders_30d,
+      newOrders: r.new_orders,
+      recentOrders: recentOrders.rows.map((o) => ({
+        id: o.id,
+        code: o.code,
+        status: o.status,
+        totalMinor: Number(o.total_minor),
+        fulfilment: o.fulfilment,
+        createdAt: o.created_at,
+        shopId: o.shop_id,
+        shopName: o.shop_name,
+      })),
       topShops: top.rows.map((x) => ({ id: x.id, name: x.name, visits: x.visits, billsMinor: Number(x.bills) })),
     };
   }

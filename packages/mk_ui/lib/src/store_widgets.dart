@@ -161,8 +161,44 @@ class MkPrice extends StatelessWidget {
   }
 }
 
-/// One option (Size, Colour…) as a row of selectable pills. Values that can't
-/// be bought with the other choices are shown faded and crossed out.
+/// Common colour names (English and Arabic) to the colour shown in the swatch.
+const Map<String, Color> _kColourNames = {
+  'black': Color(0xFF1B1B1F), 'أسود': Color(0xFF1B1B1F), 'اسود': Color(0xFF1B1B1F),
+  'white': Color(0xFFFFFFFF), 'أبيض': Color(0xFFFFFFFF), 'ابيض': Color(0xFFFFFFFF),
+  'grey': Color(0xFF9AA0A6), 'gray': Color(0xFF9AA0A6), 'رمادي': Color(0xFF9AA0A6), 'silver': Color(0xFFC9CED6), 'فضي': Color(0xFFC9CED6),
+  'red': Color(0xFFD7263D), 'أحمر': Color(0xFFD7263D), 'احمر': Color(0xFFD7263D), 'burgundy': Color(0xFF7A1F2B), 'maroon': Color(0xFF7A1F2B),
+  'pink': Color(0xFFF49AC1), 'زهري': Color(0xFFF49AC1), 'وردي': Color(0xFFF49AC1),
+  'orange': Color(0xFFF28C28), 'برتقالي': Color(0xFFF28C28),
+  'yellow': Color(0xFFF7D02C), 'أصفر': Color(0xFFF7D02C), 'اصفر': Color(0xFFF7D02C), 'gold': Color(0xFFD4AF37), 'ذهبي': Color(0xFFD4AF37),
+  'green': Color(0xFF2E9E5B), 'أخضر': Color(0xFF2E9E5B), 'اخضر': Color(0xFF2E9E5B), 'olive': Color(0xFF6B7A3A), 'mint': Color(0xFF9FE3C4),
+  'blue': Color(0xFF2F6BD8), 'أزرق': Color(0xFF2F6BD8), 'ازرق': Color(0xFF2F6BD8), 'navy': Color(0xFF1F2A55), 'كحلي': Color(0xFF1F2A55), 'sky': Color(0xFF8CC8F2),
+  'purple': Color(0xFF7446A8), 'بنفسجي': Color(0xFF7446A8), 'lilac': Color(0xFFC3A8E6),
+  'brown': Color(0xFF7A4E2D), 'بني': Color(0xFF7A4E2D), 'beige': Color(0xFFE6D3B3), 'بيج': Color(0xFFE6D3B3), 'cream': Color(0xFFF4EBD6), 'khaki': Color(0xFFC3B091),
+};
+
+/// The swatch colour for an option value: "#C8463F", a known colour name, or null.
+Color? mkColourFor(String value) {
+  final v = value.trim();
+  final hex = RegExp(r'#?([0-9a-fA-F]{6})$').firstMatch(v);
+  if (hex != null && v.startsWith('#')) return Color(int.parse('FF${hex.group(1)}', radix: 16));
+  final k = v.toLowerCase();
+  if (_kColourNames.containsKey(k)) return _kColourNames[k];
+  // "Light blue", "Dark green", "Navy blue": use the last known word.
+  for (final w in k.split(RegExp(r'\s+')).reversed) {
+    final c = _kColourNames[w];
+    if (c != null) {
+      if (k.startsWith('light')) return Color.lerp(c, Colors.white, 0.45);
+      if (k.startsWith('dark')) return Color.lerp(c, Colors.black, 0.35);
+      return c;
+    }
+  }
+  return null;
+}
+
+/// One option (Size, Colour…) the way shops show it: colours as round
+/// swatches, everything else as clean pills. The chosen value shows next to
+/// the label. Values that can't be bought with the other choices are faded
+/// and struck through, and still tappable (choosing one clears the clash).
 class MkOptionPicker extends StatelessWidget {
   const MkOptionPicker({
     required this.label,
@@ -179,56 +215,108 @@ class MkOptionPicker extends StatelessWidget {
   final ValueChanged<String> onSelect;
   final bool Function(String value)? isAvailable;
 
+  bool get _isColour {
+    final l = label.toLowerCase();
+    final named = l.contains('colo') || l.contains('لون') || l.contains('الوان');
+    final known = values.where((v) => mkColourFor(v) != null).length;
+    return named ? known >= (values.length / 2).ceil() : known == values.length && values.isNotEmpty;
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final colour = _isColour;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text.rich(
-          TextSpan(
-            text: label,
-            style: t.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-            children: [
-              if (selected != null) TextSpan(text: ':  $selected', style: t.titleSmall?.copyWith(color: MkColors.ink2, fontWeight: FontWeight.w500)),
-            ],
-          ),
+        Row(
+          children: [
+            Text(label, style: t.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: MkMotion.fast,
+                child: Text(
+                  selected ?? '',
+                  key: ValueKey(selected),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: t.bodyMedium?.copyWith(color: MkColors.ink2),
+                ),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: MkSpace.xs),
+        const SizedBox(height: 10),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: colour ? 12 : 8,
+          runSpacing: colour ? 12 : 8,
           children: [
             for (final v in values)
               Builder(
                 builder: (context) {
                   final on = v == selected;
                   final ok = isAvailable?.call(v) ?? true;
-                  return Semantics(
-                    button: true,
-                    selected: on,
-                    enabled: ok,
-                    label: '$label $v',
-                    child: MkPressable(
-                      onTap: () => onSelect(v),
-                      child: AnimatedContainer(
-                        duration: MkMotion.fast,
-                        constraints: const BoxConstraints(minWidth: 48, minHeight: 40),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  final c = colour ? mkColourFor(v) : null;
+                  final Widget chip;
+                  if (colour && c != null) {
+                    final light = c.computeLuminance() > 0.8;
+                    chip = AnimatedContainer(
+                      duration: MkMotion.fast,
+                      width: 44,
+                      height: 44,
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: on ? MkColors.purple900 : Colors.transparent, width: 2),
+                      ),
+                      child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: on ? MkColors.purple900 : MkColors.surface,
-                          borderRadius: MkRadius.all(MkRadius.md),
-                          border: Border.all(color: on ? MkColors.purple900 : MkColors.line, width: 1.5),
+                          shape: BoxShape.circle,
+                          color: c,
+                          border: light ? Border.all(color: MkColors.line, width: 1.2) : null,
+                          boxShadow: on ? [BoxShadow(color: c.withValues(alpha: 0.45), blurRadius: 10, offset: const Offset(0, 3))] : null,
                         ),
-                        child: Text(
-                          v,
-                          textAlign: TextAlign.center,
-                          style: t.labelLarge?.copyWith(
-                            color: on ? Colors.white : (ok ? MkColors.ink : MkColors.ink3),
-                            decoration: ok ? null : TextDecoration.lineThrough,
-                          ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            if (on) Icon(Icons.check_rounded, size: 18, color: light ? MkColors.purple900 : Colors.white),
+                            if (!ok) CustomPaint(size: const Size.square(34), painter: _Strike(light ? MkColors.ink3 : Colors.white)),
+                          ],
                         ),
                       ),
+                    );
+                  } else {
+                    chip = AnimatedContainer(
+                      duration: MkMotion.fast,
+                      curve: MkMotion.standard,
+                      constraints: const BoxConstraints(minWidth: 52, minHeight: 44),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: on ? MkColors.purple900 : (ok ? MkColors.surface : const Color(0xFFF4F1F7)),
+                        borderRadius: MkRadius.all(14),
+                        border: Border.all(color: on ? MkColors.purple900 : (ok ? const Color(0xFFDCD3E6) : const Color(0xFFEDE8F2)), width: 1.4),
+                        boxShadow: on ? const [BoxShadow(color: Color(0x402C123F), blurRadius: 12, offset: Offset(0, 4))] : null,
+                      ),
+                      child: Text(
+                        v,
+                        textAlign: TextAlign.center,
+                        style: t.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: on ? Colors.white : (ok ? MkColors.ink : MkColors.ink3),
+                          decoration: ok ? null : TextDecoration.lineThrough,
+                        ),
+                      ),
+                    );
+                  }
+                  return Tooltip(
+                    message: ok ? v : '$v (sold out)',
+                    child: Semantics(
+                      button: true,
+                      selected: on,
+                      enabled: ok,
+                      label: '$label $v',
+                      child: MkPressable(onTap: () => onSelect(v), child: Opacity(opacity: ok ? 1 : 0.55, child: chip)),
                     ),
                   );
                 },
@@ -238,6 +326,27 @@ class MkOptionPicker extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Diagonal line across a sold-out colour swatch.
+class _Strike extends CustomPainter {
+  const _Strike(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawLine(
+      Offset(size.width * 0.15, size.height * 0.85),
+      Offset(size.width * 0.85, size.height * 0.15),
+      Paint()
+        ..color = color
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_Strike old) => old.color != color;
 }
 
 /// − qty + control.

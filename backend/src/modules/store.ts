@@ -115,6 +115,24 @@ const ORDER_MAX_TOTAL_MINOR = 500_000;
 type Option = z.infer<typeof zOption>;
 type VariantIn = z.infer<typeof zVariant>;
 
+/** How the shop hands orders over (set in Mukafaah Manager). */
+export function fulfilmentJson(b: any) {
+  return {
+    pickup: b.store_pickup !== false,
+    delivery: b.store_delivery !== false,
+    deliveryFeeMinor: Number(b.delivery_fee_minor ?? 0),
+    freeDeliveryOverMinor: b.free_delivery_over_minor == null ? null : Number(b.free_delivery_over_minor),
+    minOrderMinor: Number(b.min_order_minor ?? 0),
+    note: b.delivery_note ?? null,
+  };
+}
+
+/** Delivery fee for an order of [subtotal]: free above the shop's threshold. */
+export function deliveryFee(f: ReturnType<typeof fulfilmentJson>, subtotal: number) {
+  if (f.freeDeliveryOverMinor != null && subtotal >= f.freeDeliveryOverMinor) return 0;
+  return f.deliveryFeeMinor;
+}
+
 const money = (m: number) => `$${(m / 100).toFixed(2).replace(/\.00$/, '')}`;
 const orderCode = () => Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[randomInt(32)]).join('');
 
@@ -497,7 +515,9 @@ export class StoreCustomerController {
 
   private async openStore(shopId: string) {
     const b = await this.db.one(
-      `SELECT id, name, whatsapp, store_enabled FROM businesses WHERE id = $1 AND status = 'ACTIVE' AND listed`,
+      `SELECT id, name, whatsapp, store_enabled, store_pickup, store_delivery, delivery_fee_minor, free_delivery_over_minor,
+              min_order_minor, delivery_note, logo_media_id
+         FROM businesses WHERE id = $1 AND status = 'ACTIVE' AND listed`,
       [shopId],
     );
     if (!b) throw Errors.notFound('Shop');
@@ -517,7 +537,9 @@ export class StoreCustomerController {
     const used = new Set(products.map((p) => p.categoryId).filter(Boolean));
     return {
       shopName: b.name,
+      logoUrl: mediaUrl(b.logo_media_id),
       canOrder: !!b.whatsapp,
+      fulfilment: fulfilmentJson(b),
       categories: cats.rows.filter((c) => used.has(c.id)).map((c) => ({ id: c.id, name: c.name, imageUrl: mediaUrl(c.media_id) })),
       products,
     };
@@ -544,6 +566,9 @@ export class StoreCustomerController {
     const b = parse(zOrder, body);
     const biz = await this.openStore(bid);
     if (!biz.whatsapp) throw new AppError(409, 'NO_WHATSAPP', 'This shop has no WhatsApp number yet');
+    const ful = fulfilmentJson(biz);
+    if (b.fulfilment === 'DELIVERY' && !ful.delivery) throw new AppError(409, 'NO_DELIVERY', 'This shop does not deliver. Choose pickup.');
+    if (b.fulfilment === 'PICKUP' && !ful.pickup) throw new AppError(409, 'NO_PICKUP', 'This shop only delivers.');
     if (b.fulfilment === 'DELIVERY' && !b.address && !b.delivery) throw Errors.validation({ address: ['REQUIRED'] });
     if (b.fulfilment === 'DELIVERY' && b.delivery && !b.contact) throw Errors.validation({ contact: ['REQUIRED'] });
     // Spam guard: a few open orders per shop and a daily cap per member.
@@ -589,6 +614,10 @@ export class StoreCustomerController {
       total += price * it.qty;
     }
     if (total > ORDER_MAX_TOTAL_MINOR) throw new AppError(409, 'ORDER_TOO_LARGE', `Orders above ${money(ORDER_MAX_TOTAL_MINOR)} are arranged with the shop directly`);
+    if (total < ful.minOrderMinor) throw new AppError(409, 'ORDER_TOO_SMALL', `The minimum order is ${money(ful.minOrderMinor)}`);
+    const subtotal = total;
+    const fee = b.fulfilment === 'DELIVERY' ? deliveryFee(ful, subtotal) : 0;
+    total = subtotal + fee;
     const d = b.fulfilment === 'DELIVERY' ? b.delivery : undefined;
     const address = d ? [d.area, d.street, d.building, d.landmark].filter(Boolean).join(', ') : b.fulfilment === 'DELIVERY' ? (b.address ?? null) : null;
     const mapUrl = d?.lat != null && d?.lng != null ? `https://maps.google.com/?q=${d.lat.toFixed(6)},${d.lng.toFixed(6)}` : null;
@@ -604,6 +633,9 @@ export class StoreCustomerController {
       '',
       ...lines.map((l) => `• ${l.qty} × ${l.name}${l.variant ? ` (${l.variant})` : ''} — ${money(l.priceMinor * l.qty)}`),
       '',
+      ...(b.fulfilment === 'DELIVERY'
+        ? [`${ar ? 'المنتجات' : 'Items'}: ${money(subtotal)}`, `${ar ? 'التوصيل' : 'Delivery'}: ${fee ? money(fee) : ar ? 'مجاني' : 'Free'}`]
+        : []),
       `${ar ? 'المجموع' : 'Total'}: ${money(total)}`,
       b.fulfilment === 'DELIVERY' ? (ar ? 'توصيل' : 'Delivery') : ar ? 'استلام من المحل' : 'Pickup from the shop',
       ...(b.fulfilment === 'DELIVERY' && address ? [`${ar ? 'العنوان' : 'Address'}: ${address}`] : []),
@@ -622,12 +654,12 @@ export class StoreCustomerController {
       const row = (
         await c.query(
           `INSERT INTO whatsapp_orders(business_id, user_id, items, total_minor, note, code, fulfilment, address,
-                                       contact_name, contact_phone, area, street, building, landmark, lat, lng)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+                                       contact_name, contact_phone, area, street, building, landmark, lat, lng, delivery_fee_minor)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
           [
             bid, a.userId, JSON.stringify(lines), total, b.note ?? null, code, b.fulfilment, address,
             b.contact?.name ?? null, b.contact?.phone ?? null, d?.area ?? null, d?.street ?? null, d?.building ?? null,
-            d?.landmark ?? null, d?.lat ?? null, d?.lng ?? null,
+            d?.landmark ?? null, d?.lat ?? null, d?.lng ?? null, fee,
           ],
         )
       ).rows[0];
@@ -646,7 +678,7 @@ export class StoreCustomerController {
       return row;
     });
     const phone = String(biz.whatsapp).replace(/\D/g, '');
-    return { orderId: r.id, code, totalMinor: total, text, whatsappUrl: `https://wa.me/${phone}?text=${encodeURIComponent(text)}` };
+    return { orderId: r.id, code, totalMinor: total, subtotalMinor: subtotal, deliveryFeeMinor: fee, text, whatsappUrl: `https://wa.me/${phone}?text=${encodeURIComponent(text)}` };
   }
 }
 
